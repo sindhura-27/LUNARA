@@ -1,0 +1,2728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>LUNARA — The Moon Within You</title>
+<meta name="description" content="AI-powered lunar cycle wellness. Track your cycle, nutrition, fitness, and holistic health.">
+<meta name="theme-color" content="#03050e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
+
+<!-- NOTE FOR PRODUCTION: Move API keys to environment variables / backend proxy -->
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, sendEmailVerification, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, updateProfile, deleteUser, browserLocalPersistence, setPersistence } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, setDoc, getDoc, updateDoc, collection, addDoc, getDocs, orderBy, query, limit, serverTimestamp, where, deleteDoc, writeBatch, onSnapshot, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyB6fGiEvHesQ7ll9kc5vo-T92o3V1-u0To",
+  authDomain: "lunara-79d57.firebaseapp.com",
+  projectId: "lunara-79d57",
+  storageBucket: "lunara-79d57.firebasestorage.app",
+  messagingSenderId: "1009171940564",
+  appId: "1:1009171940564:web:7e0251d8353a945c456741"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+setPersistence(auth, browserLocalPersistence).catch(console.warn);
+enableIndexedDbPersistence(db).catch(err => console.warn('Persistence:', err.code));
+
+const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+window._fb = { auth, db, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, updateDoc, collection, addDoc, getDocs, orderBy, query, limit, serverTimestamp, where, deleteDoc, writeBatch, sendPasswordResetEmail, sendEmailVerification, GoogleAuthProvider, googleProvider, signInWithPopup, signInWithRedirect, getRedirectResult, updateProfile, deleteUser, onSnapshot };
+
+// GEMINI — In production, proxy this through your backend
+window._geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=AIzaSyDYQCyBoWZNC7Y0OV7SceZlYd92cF20t0o`;
+
+// Handle redirect
+window._handleRedirect = async function() {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result) await _handleSuccessfulAuth(result.user);
+  } catch(e) { console.error('Redirect error:', e); }
+};
+
+// Auth state — single source of truth
+let _authHandled = false;
+onAuthStateChanged(auth, async user => {
+  if (user) {
+    if (_authHandled) return;
+    _authHandled = true;
+    try {
+      const snap = await getDoc(doc(db, "users", user.uid));
+      if (snap.exists()) {
+        const ud = snap.data();
+        window._appState.user = { ...ud, uid: user.uid, email: user.email, emailVerified: user.emailVerified, displayName: user.displayName || ud.name, photoURL: user.photoURL };
+      } else {
+        const nd = _makeNewUser(user);
+        await setDoc(doc(db, "users", user.uid), nd);
+        window._appState.user = { ...nd, uid: user.uid, email: user.email, emailVerified: user.emailVerified };
+      }
+      window._appState.isGuest = false;
+      _saveLocal();
+      document.getElementById('onbWrap')?.classList.remove('show');
+      document.getElementById('loginModal')?.classList.remove('on');
+      window._appInit();
+    } catch(e) {
+      console.warn("Firestore load error:", e);
+      window._appState.user = { uid: user.uid, email: user.email, name: user.displayName || 'Friend', emailVerified: user.emailVerified, diet: 'vegetarian', fit: 'intermediate', pcos: false, pregnancyMode: false, fertilityMode: false, cycle: { lastPd: new Date().toISOString().split('T')[0], cycLen: 28, pdLen: 5 }, createdAt: new Date().toISOString() };
+      _saveLocal();
+      document.getElementById('onbWrap')?.classList.remove('show');
+      window._appInit();
+    }
+  } else {
+    _authHandled = false;
+    window._appState.user = null;
+    _saveLocal();
+    if (!window._appState.isGuest) {
+      document.getElementById('appWrap')?.classList.remove('show');
+      document.getElementById('onbWrap')?.classList.add('show');
+    }
+  }
+});
+
+function _makeNewUser(user) {
+  return { name: user.displayName || 'Friend', email: user.email, diet: 'vegetarian', fit: 'intermediate', pcos: false, notifications: true, pregnancyMode: false, fertilityMode: false, cycle: { lastPd: new Date().toISOString().split('T')[0], cycLen: 28, pdLen: 5 }, createdAt: new Date().toISOString(), emailVerified: user.emailVerified };
+}
+window._makeNewUser = _makeNewUser;
+
+async function _handleSuccessfulAuth(user) {
+  const snap = await getDoc(doc(db, "users", user.uid));
+  if (!snap.exists()) await setDoc(doc(db, "users", user.uid), _makeNewUser(user));
+}
+window._handleSuccessfulAuth = _handleSuccessfulAuth;
+</script>
+
+<style>
+/* ═══════════ ROOT VARIABLES ═══════════ */
+:root {
+  --ink: #02040d;
+  --deep: #050917;
+  --mid: #0a1030;
+  --card: #0d1538;
+  --card2: #111c45;
+  --card3: #16235a;
+  --border: rgba(100,140,255,0.1);
+  --border2: rgba(100,140,255,0.2);
+  --border3: rgba(100,140,255,0.35);
+  --gold: #e8c56a;
+  --gold2: #f5d98a;
+  --gold3: #fff3d0;
+  --goldGlow: rgba(232,197,106,0.15);
+  --goldGlow2: rgba(232,197,106,0.25);
+  --blue: #4a7aff;
+  --blueSoft: rgba(74,122,255,0.12);
+  --text: #dce6ff;
+  --textSub: #8898cc;
+  --textMuted: #3a4870;
+  --menstrual: #c084fc;
+  --follicular: #38bdf8;
+  --ovulation: #fbbf24;
+  --luteal: #fb7185;
+  --success: #34d399;
+  --danger: #f87171;
+  --shadow: 0 8px 48px rgba(0,0,12,0.8);
+  --shadowGold: 0 0 60px rgba(232,197,106,0.2);
+  --r: 14px;
+  --r2: 20px;
+  --r3: 28px;
+  --nav-h: 72px;
+}
+
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--ink);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1,h2,h3,.display { font-family:'Cormorant Garamond',serif; }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--deep); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+/* ═══════════ ACCESSIBILITY ═══════════ */
+.skip-link { position:absolute; top:-40px; left:0; background:var(--gold); color:#000; padding:8px 16px; z-index:10000; transition:top 0.3s; font-weight:600; text-decoration:none; }
+.skip-link:focus { top:0; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:0.01ms!important; animation-iteration-count:1!important; transition-duration:0.01ms!important; } }
+
+/* ═══════════ CANVAS ═══════════ */
+#moonCanvas {
+  position:fixed; top:0; left:0; width:100%; height:100%;
+  z-index:0; pointer-events:none;
+}
+
+/* ═══════════ OFFLINE BAR ═══════════ */
+.offline-bar { display:none; position:fixed; top:0; left:0; width:100%; background:var(--gold); color:#000; text-align:center; padding:8px; font-size:12px; font-weight:600; z-index:9999; }
+.offline-bar.show { display:block; }
+
+/* ═══════════ SPLASH ═══════════ */
+.splash {
+  position:fixed; inset:0;
+  background:radial-gradient(ellipse at 50% 35%, #0d1a50 0%, #02040d 65%);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  z-index:8000; transition:opacity 1s ease, transform 1s ease;
+}
+.splash.out { opacity:0; transform:scale(1.08); pointer-events:none; }
+
+.splash-moon-wrap {
+  position:relative; width:140px; height:140px; margin-bottom:36px;
+  animation:moonFloat 5s ease-in-out infinite;
+}
+.splash-moon {
+  width:140px; height:140px; border-radius:50%;
+  background:radial-gradient(circle at 36% 32%, #fffbe8 0%, #f5d98a 25%, #e8c56a 52%, #b8962a 78%, #7a6010 100%);
+  box-shadow:
+    0 0 0 1px rgba(232,197,106,0.3),
+    0 0 40px 8px rgba(232,197,106,0.6),
+    0 0 100px 24px rgba(232,197,106,0.3),
+    0 0 200px 60px rgba(232,197,106,0.12);
+  animation:moonGlow 3s ease-in-out infinite;
+}
+.splash-craters {
+  position:absolute; inset:0; border-radius:50%; overflow:hidden; opacity:0.25;
+}
+.splash-crater {
+  position:absolute; border-radius:50%;
+  background:radial-gradient(circle, transparent 40%, rgba(0,0,0,0.3) 100%);
+}
+.splash-crater:nth-child(1) { width:18px; height:18px; top:28%; left:42%; }
+.splash-crater:nth-child(2) { width:12px; height:12px; top:55%; left:25%; }
+.splash-crater:nth-child(3) { width:8px; height:8px; top:40%; left:68%; }
+.splash-crater:nth-child(4) { width:14px; height:14px; top:70%; left:55%; }
+
+@keyframes moonFloat { 0%,100%{transform:translateY(0) rotate(-2deg)} 50%{transform:translateY(-20px) rotate(2deg)} }
+@keyframes moonGlow {
+  0%,100%{box-shadow:0 0 0 1px rgba(232,197,106,0.3),0 0 40px 8px rgba(232,197,106,0.6),0 0 100px 24px rgba(232,197,106,0.3),0 0 200px 60px rgba(232,197,106,0.12)}
+  50%{box-shadow:0 0 0 1px rgba(232,197,106,0.5),0 0 60px 14px rgba(232,197,106,0.8),0 0 140px 36px rgba(232,197,106,0.4),0 0 280px 80px rgba(232,197,106,0.18)}
+}
+
+.splash-stars {
+  position:absolute; inset:0; overflow:hidden; pointer-events:none;
+}
+.splash-star {
+  position:absolute; background:#fff; border-radius:50%;
+  animation:starTwinkle 2s ease-in-out infinite;
+}
+
+@keyframes starTwinkle { 0%,100%{opacity:0.3;transform:scale(0.8)} 50%{opacity:1;transform:scale(1)} }
+
+.splash-title {
+  font-size:clamp(2.8rem,10vw,5.5rem); font-weight:300; letter-spacing:10px;
+  background:linear-gradient(135deg,#fffbe8 0%,#f5d98a 40%,#e8c56a 70%,#fff8e0 100%);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+  animation:fadeUp 0.8s ease 0.3s both;
+  text-shadow:none;
+}
+.splash-sub {
+  font-size:0.72rem; letter-spacing:6px; color:var(--textMuted);
+  margin-top:8px; animation:fadeUp 0.8s ease 0.6s both;
+}
+.splash-bar {
+  width:220px; height:1px; background:rgba(255,255,255,0.06);
+  border-radius:2px; overflow:hidden; margin-top:56px;
+  animation:fadeUp 0.8s ease 0.9s both;
+}
+.splash-bar-fill {
+  height:100%; width:0%;
+  background:linear-gradient(90deg,transparent,var(--gold),var(--gold2),transparent);
+  animation:barLoad 3.5s cubic-bezier(0.4,0,0.2,1) forwards;
+}
+@keyframes barLoad { to{width:100%} }
+@keyframes fadeUp { from{opacity:0;transform:translateY(28px)} to{opacity:1;transform:translateY(0)} }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+@keyframes scaleIn { from{opacity:0;transform:scale(0.88) translateY(16px)} to{opacity:1;transform:scale(1) translateY(0)} }
+@keyframes slideUp { from{opacity:0;transform:translateY(40px)} to{opacity:1;transform:translateY(0)} }
+
+/* ═══════════ ONBOARDING ═══════════ */
+.onb { display:none; min-height:100vh; padding:24px 16px 80px; max-width:480px; margin:0 auto; position:relative; z-index:10; }
+.onb.show { display:block; animation:fadeIn 0.5s ease; }
+.onb-step { display:none; }
+.onb-step.on { display:block; animation:fadeUp 0.4s ease; }
+
+.onb-progress {
+  height:2px; background:rgba(255,255,255,0.06); border-radius:2px;
+  overflow:hidden; margin-bottom:32px; margin-top:20px;
+}
+.onb-progress-fill {
+  height:100%; background:linear-gradient(90deg,var(--gold),var(--gold2));
+  border-radius:2px; transition:width 0.4s ease;
+}
+
+.feat-cards { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:20px 0 28px; }
+.feat-card {
+  background:linear-gradient(135deg,var(--card),var(--card2));
+  border:1px solid var(--border); border-radius:var(--r); padding:16px; text-align:center;
+  transition:all 0.3s;
+}
+.feat-card:hover { border-color:var(--border2); transform:translateY(-2px); }
+.feat-icon { font-size:1.8rem; margin-bottom:8px; }
+.feat-title { font-size:0.82rem; font-weight:600; margin-bottom:4px; }
+.feat-desc { font-size:0.72rem; color:var(--textSub); line-height:1.4; }
+
+/* ═══════════ GUEST BANNER ═══════════ */
+.guest-banner {
+  background:linear-gradient(135deg,rgba(232,197,106,0.12),rgba(74,122,255,0.08));
+  border:1px solid rgba(232,197,106,0.25); border-radius:var(--r);
+  padding:10px 14px; margin-bottom:14px; text-align:center; font-size:0.8rem; color:var(--textSub);
+}
+
+/* ═══════════ APP WRAPPER ═══════════ */
+.app { display:none; min-height:100vh; padding-bottom:calc(var(--nav-h) + 20px); position:relative; z-index:5; }
+.app.show { display:block; animation:fadeIn 0.5s ease; }
+
+/* ═══════════ HEADER ═══════════ */
+.hdr {
+  position:sticky; top:0;
+  background:rgba(2,4,13,0.88); backdrop-filter:blur(28px); -webkit-backdrop-filter:blur(28px);
+  border-bottom:1px solid var(--border);
+  padding:12px 16px; z-index:200;
+  display:flex; justify-content:space-between; align-items:center;
+}
+.hdr-brand { display:flex; flex-direction:column; }
+.hdr-logo {
+  font-family:'Cormorant Garamond',serif; font-size:1.45rem; font-weight:500;
+  background:linear-gradient(135deg,var(--gold3) 0%,var(--gold2) 45%,var(--gold) 80%);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+  letter-spacing:3px;
+}
+.hdr-tagline { font-size:0.58rem; letter-spacing:4px; color:var(--textMuted); margin-top:1px; }
+.hdr-btns { display:flex; gap:6px; align-items:center; }
+
+/* ═══════════ NAVIGATION ═══════════ */
+.nav {
+  position:fixed; bottom:0; left:0; width:100%;
+  background:rgba(2,4,13,0.94); backdrop-filter:blur(28px); -webkit-backdrop-filter:blur(28px);
+  border-top:1px solid var(--border);
+  display:flex; justify-content:space-around;
+  padding:8px 4px calc(8px + env(safe-area-inset-bottom));
+  z-index:200; height:var(--nav-h);
+}
+.nav-item {
+  display:flex; flex-direction:column; align-items:center; gap:3px;
+  cursor:pointer; padding:6px 8px; border-radius:12px;
+  transition:all 0.25s; color:var(--textMuted); position:relative;
+  min-width:44px; justify-content:center;
+}
+.nav-item.on { color:var(--gold); }
+.nav-item.on .nav-icon { transform:scale(1.15); }
+.nav-icon { font-size:1.2rem; transition:transform 0.25s; }
+.nav-lbl { font-size:0.6rem; font-weight:500; letter-spacing:0.3px; white-space:nowrap; }
+.cart-badge {
+  position:absolute; top:2px; right:2px;
+  background:var(--danger); color:#fff;
+  width:15px; height:15px; border-radius:50%;
+  display:none; align-items:center; justify-content:center;
+  font-size:0.58rem; font-weight:700;
+}
+.cart-badge.on { display:flex; }
+
+/* ═══════════ SCREENS ═══════════ */
+.screen { display:none; animation:fadeIn 0.25s ease; }
+.screen.on { display:block; }
+.content { padding:14px; max-width:900px; margin:0 auto; }
+
+/* ═══════════ CARDS ═══════════ */
+.card {
+  background:var(--card); border:1px solid var(--border);
+  border-radius:var(--r2); padding:18px; margin-bottom:14px;
+  box-shadow:var(--shadow);
+}
+.card-glass {
+  background:rgba(13,21,56,0.6); backdrop-filter:blur(12px);
+  border-color:var(--border2);
+}
+.card-gold {
+  background:linear-gradient(135deg,rgba(232,197,106,0.08),rgba(74,122,255,0.06));
+  border-color:rgba(232,197,106,0.22);
+}
+.card h3 {
+  font-family:'Cormorant Garamond',serif; font-size:1.05rem;
+  color:var(--gold); margin-bottom:12px; font-weight:500;
+  display:flex; align-items:center; gap:6px;
+}
+
+/* ═══════════ BUTTONS ═══════════ */
+.btn {
+  padding:12px 20px; border:none; border-radius:12px;
+  cursor:pointer; font-weight:500; font-size:0.88rem;
+  font-family:'DM Sans',sans-serif;
+  transition:all 0.25s; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  white-space:nowrap; min-height:44px; letter-spacing:0.2px;
+}
+.btn:focus-visible { outline:2px solid var(--gold); outline-offset:2px; }
+.btn-gold {
+  background:linear-gradient(135deg,var(--gold) 0%,var(--gold2) 100%);
+  color:#0c0800; font-weight:600;
+  box-shadow:0 4px 16px rgba(232,197,106,0.25);
+}
+.btn-gold:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 8px 24px rgba(232,197,106,0.45); }
+.btn-gold:active:not(:disabled) { transform:translateY(0); }
+.btn-outline { background:transparent; border:1px solid var(--border2); color:var(--text); }
+.btn-outline:hover:not(:disabled) { background:var(--blueSoft); border-color:var(--blue); }
+.btn-ghost { background:rgba(255,255,255,0.04); border:1px solid var(--border); color:var(--textSub); }
+.btn-ghost:hover:not(:disabled) { background:rgba(255,255,255,0.08); }
+.btn-sm { padding:8px 14px; font-size:0.8rem; min-height:36px; border-radius:10px; }
+.btn-block { width:100%; }
+.btn:disabled { opacity:0.45; cursor:not-allowed; transform:none!important; box-shadow:none!important; }
+.btn-google { background:#fff; color:#333; font-weight:500; border:1px solid #ddd; }
+.btn-google:hover:not(:disabled) { background:#f5f5f5; }
+.btn-danger { background:rgba(248,113,113,0.15); border:1px solid rgba(248,113,113,0.3); color:var(--danger); }
+.btn-danger:hover:not(:disabled) { background:rgba(248,113,113,0.25); }
+
+/* ═══════════ INPUTS ═══════════ */
+.lbl { display:block; margin-bottom:5px; font-size:0.78rem; color:var(--textSub); font-weight:500; letter-spacing:0.3px; }
+.inp {
+  width:100%; padding:12px 14px;
+  background:rgba(255,255,255,0.04); border:1px solid var(--border);
+  border-radius:12px; color:var(--text); font-size:0.88rem; margin-bottom:12px;
+  font-family:'DM Sans',sans-serif; transition:border-color 0.2s, box-shadow 0.2s;
+}
+.inp:focus { outline:none; border-color:rgba(232,197,106,0.45); box-shadow:0 0 0 3px rgba(232,197,106,0.08); }
+select.inp { cursor:pointer; }
+textarea.inp { resize:vertical; }
+.inp-err { border-color:var(--danger)!important; box-shadow:0 0 0 3px rgba(248,113,113,0.1)!important; }
+.chk-row { display:flex; align-items:flex-start; gap:10px; margin-bottom:12px; }
+.chk-row input[type=checkbox] { width:16px; height:16px; accent-color:var(--gold); margin-top:3px; flex-shrink:0; }
+.chk-row label { font-size:0.83rem; color:var(--textSub); line-height:1.45; }
+.form-err { color:var(--danger); font-size:0.78rem; margin-top:-8px; margin-bottom:10px; display:none; padding:6px 10px; background:rgba(248,113,113,0.08); border-radius:8px; }
+.form-err.show { display:block; }
+
+/* ═══════════ PILLS ═══════════ */
+.pill { display:inline-flex; align-items:center; gap:5px; padding:5px 12px; border-radius:20px; font-size:0.74rem; font-weight:500; }
+.pill-menstrual { background:rgba(192,132,252,0.14); color:var(--menstrual); }
+.pill-follicular { background:rgba(56,189,248,0.14); color:var(--follicular); }
+.pill-ovulation { background:rgba(251,191,36,0.16); color:var(--ovulation); }
+.pill-luteal { background:rgba(251,113,133,0.14); color:var(--luteal); }
+.pill-gold { background:var(--goldGlow); color:var(--gold); border:1px solid rgba(232,197,106,0.2); }
+.pill-success { background:rgba(52,211,153,0.12); color:var(--success); }
+
+/* ═══════════ HOME SCREEN ═══════════ */
+.phase-ring-wrap {
+  position:relative; width:200px; height:200px; margin:0 auto 20px;
+  filter:drop-shadow(0 0 24px rgba(232,197,106,0.15));
+}
+.phase-ring-wrap svg { transform:rotate(-90deg); width:100%; height:100%; }
+.ring-center {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center;
+}
+.ring-day { font-family:'Cormorant Garamond',serif; font-size:3rem; font-weight:300; color:var(--gold); line-height:1; }
+.ring-phase { font-size:0.65rem; color:var(--textSub); letter-spacing:2px; text-transform:uppercase; margin-top:4px; }
+.ring-date { font-size:0.7rem; color:var(--textMuted); margin-top:2px; }
+
+.insight-card {
+  background:linear-gradient(135deg,rgba(13,22,68,0.9),rgba(8,13,40,0.95));
+  border:1px solid rgba(232,197,106,0.18);
+  border-radius:var(--r2); padding:20px; margin-bottom:14px;
+  position:relative; overflow:hidden;
+}
+.insight-card::before {
+  content:''; position:absolute; top:-50%; right:-30%;
+  width:200px; height:200px; border-radius:50%;
+  background:radial-gradient(circle,rgba(232,197,106,0.06) 0%,transparent 70%);
+  pointer-events:none;
+}
+.insight-title { font-family:'Cormorant Garamond',serif; font-size:1.2rem; color:var(--gold); margin-bottom:10px; font-weight:500; }
+.insight-body { color:var(--textSub); line-height:1.7; font-size:0.87rem; margin-bottom:14px; }
+.affirm-box {
+  background:rgba(232,197,106,0.07); border-left:3px solid var(--gold);
+  padding:12px 16px; border-radius:0 12px 12px 0;
+  font-style:italic; color:var(--text); font-size:0.93rem; line-height:1.6;
+  font-family:'Cormorant Garamond',serif;
+}
+
+.phase-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:14px; }
+.phase-cell {
+  background:var(--card); border:1px solid var(--border);
+  border-radius:12px; padding:10px 4px; text-align:center;
+  cursor:pointer; transition:all 0.25s;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+}
+.phase-cell:hover { border-color:var(--border2); }
+.phase-cell.active { border-color:rgba(232,197,106,0.4); background:var(--goldGlow); }
+.phase-emoji { font-size:1.3rem; margin-bottom:3px; }
+.phase-name { font-size:0.62rem; color:var(--textSub); font-weight:500; }
+
+.body-needs { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; }
+.need-card { background:var(--card2); border:1px solid var(--border); border-radius:12px; padding:12px; }
+.need-icon { font-size:1.3rem; margin-bottom:5px; }
+.need-title { font-size:0.78rem; font-weight:600; margin-bottom:3px; }
+.need-text { font-size:0.75rem; color:var(--textSub); line-height:1.5; }
+
+/* ═══════════ NEXT PERIOD PREDICTION ═══════════ */
+.prediction-card {
+  background:linear-gradient(135deg,rgba(192,132,252,0.1),rgba(74,122,255,0.08));
+  border:1px solid rgba(192,132,252,0.2);
+  border-radius:var(--r2); padding:16px; margin-bottom:14px;
+}
+.prediction-dates { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.pred-date {
+  background:rgba(255,255,255,0.05); border:1px solid var(--border2);
+  border-radius:10px; padding:8px 12px; text-align:center; flex:1; min-width:80px;
+}
+.pred-cycle { font-size:0.62rem; color:var(--textMuted); margin-bottom:2px; }
+.pred-value { font-size:0.82rem; font-weight:500; color:var(--menstrual); }
+
+/* ═══════════ HYDRATION ═══════════ */
+.hydration-container { background:var(--card); border:1px solid var(--border); border-radius:var(--r2); padding:16px; margin-bottom:14px; }
+.hydration-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.water-cups { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:10px; }
+.water-cup {
+  width:34px; height:44px; border-radius:5px 5px 10px 10px;
+  border:1.5px solid var(--border); background:rgba(74,122,255,0.04);
+  cursor:pointer; transition:all 0.3s;
+  display:flex; align-items:flex-end; justify-content:center;
+  font-size:0.65rem; color:var(--textMuted); padding-bottom:3px; min-height:44px;
+  position:relative; overflow:hidden;
+}
+.water-cup::before {
+  content:''; position:absolute; bottom:0; left:0; right:0;
+  background:linear-gradient(135deg,rgba(56,189,248,0.5),rgba(74,122,255,0.6));
+  height:0%; transition:height 0.4s ease; border-radius:3px 3px 8px 8px;
+}
+.water-cup.filled { border-color:rgba(56,189,248,0.5); color:#fff; }
+.water-cup.filled::before { height:100%; }
+.water-cup span { position:relative; z-index:1; }
+.water-progress-bar { background:rgba(255,255,255,0.05); height:6px; border-radius:3px; overflow:hidden; margin-bottom:4px; }
+.water-progress-fill { height:100%; background:linear-gradient(90deg,#38bdf8,#4a7aff); border-radius:3px; transition:width 0.5s ease; }
+.water-stats { font-size:0.74rem; color:var(--textSub); text-align:center; }
+
+/* ═══════════ MEALS ═══════════ */
+.meal-item { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:10px; display:flex; gap:12px; align-items:flex-start; transition:border-color 0.2s; }
+.meal-item:hover { border-color:var(--border2); }
+.meal-emoji-box { width:46px; height:46px; border-radius:12px; background:linear-gradient(135deg,var(--goldGlow2),var(--blueSoft)); border:1px solid var(--border2); display:flex; align-items:center; justify-content:center; font-size:1.4rem; flex-shrink:0; }
+.meal-body { flex:1; min-width:0; }
+.meal-name { font-weight:600; font-size:0.9rem; margin-bottom:2px; }
+.meal-why { color:var(--textSub); font-size:0.77rem; margin-bottom:7px; line-height:1.45; }
+.tags-row { display:flex; flex-wrap:wrap; gap:4px; }
+.tag { padding:2px 8px; border-radius:10px; font-size:0.63rem; font-weight:600; background:rgba(74,122,255,0.12); color:#89a8ff; }
+.tag-iron { background:rgba(251,113,133,0.12); color:var(--luteal); }
+.tag-pcos { background:rgba(192,132,252,0.12); color:var(--menstrual); }
+.tag-protein { background:rgba(52,211,153,0.12); color:var(--success); }
+.tag-low-gi { background:rgba(251,191,36,0.12); color:var(--ovulation); }
+.tag-mag { background:rgba(56,189,248,0.12); color:var(--follicular); }
+.meal-section-title { font-family:'Cormorant Garamond',serif; font-size:1rem; color:var(--gold); margin:16px 0 8px; font-weight:500; display:flex; align-items:center; gap:6px; }
+.avoid-list { list-style:none; }
+.avoid-list li { padding:6px 0; color:var(--textSub); font-size:0.82rem; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; }
+.avoid-list li::before { content:'✕'; color:var(--danger); font-size:0.7rem; flex-shrink:0; }
+.avoid-list li:last-child { border-bottom:none; }
+
+/* ═══════════ FITNESS ═══════════ */
+.workout-card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:10px; transition:all 0.25s; }
+.workout-card:hover { border-color:var(--border2); transform:translateY(-1px); }
+.workout-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; }
+.workout-name { font-weight:600; font-size:0.9rem; margin-bottom:2px; }
+.workout-meta { color:var(--textSub); font-size:0.76rem; }
+.workout-desc { color:var(--textSub); font-size:0.8rem; line-height:1.5; }
+.phase-wisdom { background:linear-gradient(135deg,rgba(232,197,106,0.06),rgba(74,122,255,0.04)); border:1px solid rgba(232,197,106,0.14); border-radius:14px; padding:14px; margin-bottom:14px; }
+.wisdom-title { font-family:'Cormorant Garamond',serif; font-size:1rem; color:var(--gold); margin-bottom:6px; }
+.wisdom-text { color:var(--textSub); font-size:0.84rem; line-height:1.6; }
+.energy-bar { background:rgba(255,255,255,0.06); height:8px; border-radius:4px; overflow:hidden; }
+.energy-fill { height:100%; background:linear-gradient(90deg,var(--follicular),var(--blue)); border-radius:4px; transition:width 0.8s ease; }
+
+/* ═══════════ CHALLENGE ═══════════ */
+.challenge-card { background:linear-gradient(135deg,rgba(232,197,106,0.09),rgba(74,122,255,0.07)); border:1px solid rgba(232,197,106,0.25); border-radius:var(--r2); padding:16px; margin-bottom:12px; }
+.challenge-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.challenge-progress { background:rgba(255,255,255,0.06); height:6px; border-radius:3px; overflow:hidden; margin:6px 0; }
+.challenge-progress-fill { height:100%; background:linear-gradient(90deg,var(--gold),var(--gold2)); border-radius:3px; transition:width 0.5s; }
+.day-marker { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; border:1.5px solid var(--border); font-size:0.6rem; margin:2px; cursor:pointer; transition:all 0.2s; }
+.day-marker.completed { background:var(--gold); border-color:var(--gold); color:var(--ink); font-weight:700; }
+.day-marker.today { border-color:var(--blue); color:var(--follicular); }
+
+/* ═══════════ JOURNAL ═══════════ */
+.mood-buttons { display:flex; gap:8px; justify-content:center; margin:14px 0; flex-wrap:wrap; }
+.mood-btn { width:46px; height:46px; border-radius:50%; border:2px solid var(--border); background:transparent; cursor:pointer; font-size:1.3rem; display:flex; align-items:center; justify-content:center; transition:all 0.25s; }
+.mood-btn:hover,.mood-btn.sel { border-color:var(--gold); background:var(--goldGlow); transform:scale(1.12); }
+.journal-entry { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:10px; transition:border-color 0.2s; }
+.journal-entry:hover { border-color:var(--border2); }
+.entry-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.entry-meta { color:var(--textMuted); font-size:0.72rem; }
+.entry-text { color:var(--textSub); font-size:0.82rem; line-height:1.55; }
+.ai-analysis { background:rgba(232,197,106,0.05); border-left:2px solid var(--gold); padding:8px 12px; margin-top:10px; border-radius:0 8px 8px 0; font-size:0.78rem; color:var(--textSub); line-height:1.55; }
+
+/* ═══════════ WELLNESS ═══════════ */
+.wellness-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:8px; margin-bottom:14px; }
+.wellness-item { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px; text-align:center; cursor:pointer; transition:all 0.25s; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:70px; }
+.wellness-item:hover { border-color:var(--border2); transform:translateY(-2px); }
+.wellness-item.active { border-color:var(--gold); background:var(--goldGlow); }
+.wellness-icon { font-size:1.4rem; margin-bottom:4px; }
+.wellness-name { font-size:0.72rem; color:var(--textSub); font-weight:500; }
+
+/* ═══════════ ANALYTICS ═══════════ */
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(100px,1fr)); gap:8px; margin-bottom:16px; }
+.stat-box { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px; text-align:center; }
+.stat-val { font-family:'Cormorant Garamond',serif; font-size:2rem; color:var(--gold); font-weight:300; line-height:1; }
+.stat-lbl { font-size:0.7rem; color:var(--textSub); margin-top:4px; }
+.chart-container { background:var(--card); border:1px solid var(--border); border-radius:var(--r2); padding:16px; margin-bottom:14px; }
+.chart-container h3 { margin-bottom:12px; }
+.chart-wrap { height:200px; position:relative; }
+.ml-insight { background:linear-gradient(135deg,rgba(74,122,255,0.08),rgba(232,197,106,0.05)); border:1px solid rgba(74,122,255,0.18); border-radius:12px; padding:14px; margin-bottom:12px; }
+.ml-badge { display:inline-flex; align-items:center; gap:5px; background:rgba(74,122,255,0.15); color:#89a8ff; padding:3px 10px; border-radius:20px; font-size:0.67rem; font-weight:600; margin-bottom:8px; }
+.pattern-report p { color:var(--textSub); font-size:0.84rem; line-height:1.65; margin-bottom:8px; }
+
+/* ═══════════ SHOP ═══════════ */
+.shop-filter { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+.shop-filter-btn { padding:6px 14px; border:1px solid var(--border); border-radius:20px; background:transparent; color:var(--textSub); cursor:pointer; font-size:0.78rem; transition:all 0.2s; min-height:34px; font-family:'DM Sans',sans-serif; }
+.shop-filter-btn.active { background:var(--goldGlow); border-color:var(--gold); color:var(--gold); }
+.shop-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; }
+.prod-card { background:var(--card); border:1px solid var(--border); border-radius:var(--r2); overflow:hidden; transition:all 0.25s; }
+.prod-card:hover { transform:translateY(-3px); border-color:var(--border2); box-shadow:0 12px 36px rgba(0,0,12,0.5); }
+.prod-img-wrap { height:160px; overflow:hidden; background:var(--card2); display:flex; align-items:center; justify-content:center; position:relative; }
+.prod-img-wrap img { width:100%; height:100%; object-fit:cover; transition:transform 0.4s; }
+.prod-card:hover .prod-img-wrap img { transform:scale(1.06); }
+.prod-badge { position:absolute; top:8px; left:8px; background:rgba(232,197,106,0.92); color:#0c0800; padding:3px 8px; border-radius:20px; font-size:0.63rem; font-weight:700; }
+.prod-info { padding:12px; }
+.prod-name { font-weight:600; font-size:0.88rem; margin-bottom:4px; }
+.prod-desc { font-size:0.73rem; color:var(--textSub); margin-bottom:8px; line-height:1.4; }
+.prod-price { font-family:'Cormorant Garamond',serif; font-size:1.3rem; color:var(--gold); margin-bottom:8px; }
+.cart-summary { background:linear-gradient(135deg,rgba(232,197,106,0.08),rgba(74,122,255,0.05)); border:1px solid rgba(232,197,106,0.2); border-radius:var(--r2); padding:14px; margin-bottom:14px; }
+
+/* ═══════════ CYCLE SCREEN ═══════════ */
+.cycle-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:14px; }
+.mode-toggle-group { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+.mode-toggle { padding:8px 14px; border:1px solid var(--border); border-radius:20px; background:transparent; color:var(--textSub); cursor:pointer; font-size:0.78rem; transition:all 0.2s; min-height:36px; font-family:'DM Sans',sans-serif; }
+.mode-toggle.active { background:var(--goldGlow); border-color:var(--gold); color:var(--gold); }
+.toggle-wrap { display:flex; align-items:center; gap:14px; }
+.toggle { width:44px; height:24px; border-radius:12px; background:var(--border2); cursor:pointer; position:relative; transition:background 0.3s; flex-shrink:0; }
+.toggle::after { content:''; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:transform 0.3s, background 0.3s; }
+.toggle.on { background:var(--gold); }
+.toggle.on::after { transform:translateX(20px); background:var(--ink); }
+
+/* ═══════════ MEDICATION ═══════════ */
+.med-tracker { background:var(--card); border:1px solid var(--border); border-radius:var(--r2); padding:14px; margin-bottom:12px; }
+.med-item { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); }
+.med-item:last-child { border-bottom:none; }
+.med-dot { width:8px; height:8px; border-radius:50%; background:var(--success); margin-right:8px; flex-shrink:0; }
+.med-info { flex:1; }
+.med-name-text { font-size:0.85rem; font-weight:500; }
+.med-time-text { font-size:0.72rem; color:var(--textSub); }
+
+/* ═══════════ MODAL ═══════════ */
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); display:none; align-items:center; justify-content:center; z-index:500; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); padding:16px; }
+.modal-overlay.on { display:flex; }
+.modal-box { background:var(--card); border:1px solid var(--border2); border-radius:var(--r2); padding:20px; max-width:460px; width:100%; max-height:88vh; overflow-y:auto; animation:scaleIn 0.3s ease; box-shadow:var(--shadow); }
+
+/* ═══════════ TOAST ═══════════ */
+.toast { position:fixed; bottom:calc(var(--nav-h) + 14px); left:50%; transform:translateX(-50%) translateY(16px); background:var(--card2); border:1px solid var(--border2); color:var(--text); padding:10px 20px; border-radius:24px; box-shadow:var(--shadow); z-index:600; font-size:0.84rem; opacity:0; transition:all 0.3s; pointer-events:none; white-space:nowrap; max-width:calc(100vw - 32px); overflow:hidden; text-overflow:ellipsis; }
+.toast.on { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* ═══════════ AI LOADING ═══════════ */
+.ai-loading { display:flex; align-items:center; gap:10px; color:var(--textSub); font-size:0.82rem; padding:4px 0; }
+.ai-dots span { display:inline-block; width:5px; height:5px; border-radius:50%; background:var(--gold); margin:0 2px; animation:dotPulse 1.2s ease-in-out infinite; }
+.ai-dots span:nth-child(2) { animation-delay:0.2s; }
+.ai-dots span:nth-child(3) { animation-delay:0.4s; }
+@keyframes dotPulse { 0%,80%,100%{opacity:0.3;transform:scale(0.8)} 40%{opacity:1;transform:scale(1)} }
+
+/* ═══════════ STREAK BADGE ═══════════ */
+.streak-badge { display:inline-flex; align-items:center; gap:4px; background:linear-gradient(135deg,rgba(251,191,36,0.18),rgba(232,197,106,0.12)); border:1px solid rgba(251,191,36,0.28); border-radius:16px; padding:5px 10px; font-weight:600; font-size:0.76rem; color:var(--gold); }
+
+/* ═══════════ SYMPTOM CORRELATION ═══════════ */
+.correlation-bar { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.corr-label { font-size:0.76rem; color:var(--textSub); width:80px; flex-shrink:0; }
+.corr-track { flex:1; height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden; }
+.corr-fill { height:100%; border-radius:3px; transition:width 0.8s ease; }
+
+/* ═══════════ SETTINGS ═══════════ */
+.settings-row { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid var(--border); }
+.settings-row:last-child { border-bottom:none; }
+.settings-label { font-size:0.85rem; font-weight:500; }
+.settings-sub { font-size:0.72rem; color:var(--textSub); margin-top:2px; }
+
+/* ═══════════ EMPTY STATE ═══════════ */
+.empty-state { text-align:center; padding:32px 20px; color:var(--textMuted); }
+.empty-state-icon { font-size:2.2rem; margin-bottom:10px; }
+.empty-state-text { font-size:0.84rem; line-height:1.5; }
+
+/* ═══════════ AI REPORT ═══════════ */
+.ai-report-box {
+  background:linear-gradient(135deg,rgba(13,22,68,0.9),rgba(8,13,40,0.95));
+  border:1px solid rgba(232,197,106,0.2); border-radius:var(--r2); padding:20px; margin-top:12px;
+}
+.report-section { margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--border); }
+.report-section:last-child { border-bottom:none; margin-bottom:0; padding-bottom:0; }
+.report-section-title { font-family:'Cormorant Garamond',serif; font-size:1.05rem; color:var(--gold); margin-bottom:8px; font-weight:500; }
+.ai-report-box p { color:var(--textSub); font-size:0.86rem; line-height:1.75; margin-bottom:8px; }
+.ai-report-box p:last-child { margin-bottom:0; }
+.ai-report-box strong { color:var(--gold2); }
+
+/* ═══════════ RESPONSIVE ═══════════ */
+@media (max-width:580px) {
+  .phase-grid { grid-template-columns:repeat(2,1fr); }
+  .shop-grid { grid-template-columns:1fr 1fr; }
+  .content { padding:10px; }
+  .nav-lbl { font-size:0.57rem; }
+  .wellness-grid { grid-template-columns:repeat(auto-fill,minmax(88px,1fr)); }
+  .hdr { padding:10px 12px; }
+  .cycle-stats { grid-template-columns:1fr 1fr 1fr; }
+}
+@media (max-width:380px) {
+  .shop-grid { grid-template-columns:1fr; }
+  .cycle-stats { grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+
+<a href="#mainContent" class="skip-link">Skip to main content</a>
+<div class="offline-bar" id="offBar">📴 Offline — changes saved locally</div>
+<canvas id="moonCanvas"></canvas>
+
+<!-- SPLASH -->
+<div class="splash" id="splash" aria-hidden="true">
+  <div class="splash-stars" id="splashStars"></div>
+  <div class="splash-moon-wrap">
+    <div class="splash-moon"></div>
+    <div class="splash-craters">
+      <div class="splash-crater"></div>
+      <div class="splash-crater"></div>
+      <div class="splash-crater"></div>
+      <div class="splash-crater"></div>
+    </div>
+  </div>
+  <h1 class="splash-title">LUNARA</h1>
+  <p class="splash-sub">THE MOON WITHIN YOU</p>
+  <div class="splash-bar"><div class="splash-bar-fill"></div></div>
+</div>
+
+<!-- ONBOARDING -->
+<div class="onb" id="onbWrap" role="main">
+  <div class="onb-progress"><div class="onb-progress-fill" id="onbFill" style="width:25%"></div></div>
+
+  <div class="onb-step on" id="step1">
+    <div style="text-align:center;margin-bottom:24px">
+      <div style="font-size:3rem;margin-bottom:12px">🌙</div>
+      <h1 style="font-size:2.2rem;font-weight:300;color:var(--gold);margin-bottom:6px">Welcome to LUNARA</h1>
+      <p style="color:var(--textSub);font-family:'Cormorant Garamond',serif;font-style:italic;font-size:1.05rem">Your AI-powered lunar cycle companion</p>
+    </div>
+    <div class="feat-cards">
+      <div class="feat-card"><div class="feat-icon">🌙</div><div class="feat-title">Cycle Intelligence</div><div class="feat-desc">4-phase AI tracking</div></div>
+      <div class="feat-card"><div class="feat-icon">🧠</div><div class="feat-title">AI Insights</div><div class="feat-desc">Personalised daily wisdom</div></div>
+      <div class="feat-card"><div class="feat-icon">🍛</div><div class="feat-title">200+ Indian Meals</div><div class="feat-desc">Phase-specific nutrition</div></div>
+      <div class="feat-card"><div class="feat-icon">⚡</div><div class="feat-title">30-Day Challenges</div><div class="feat-desc">Structured fitness roadmaps</div></div>
+    </div>
+    <button class="btn btn-gold btn-block" onclick="goStep(2)">Begin Your Journey →</button>
+    <button class="btn btn-ghost btn-block" style="margin-top:8px" onclick="startGuestMode()">Try as Guest 👋</button>
+  </div>
+
+  <div class="onb-step" id="step2">
+    <h2 style="font-size:1.6rem;font-weight:300;color:var(--gold);margin-bottom:18px">🌙 Your Cycle</h2>
+    <label class="lbl" for="i_lastPd">First day of your last period</label>
+    <input type="date" class="inp" id="i_lastPd">
+    <label class="lbl" for="i_cycLen">Average cycle length</label>
+    <select class="inp" id="i_cycLen">
+      <option value="21">21 days</option><option value="22">22</option><option value="23">23</option>
+      <option value="24">24</option><option value="25">25</option><option value="26">26</option>
+      <option value="27">27</option><option value="28" selected>28 days (average)</option>
+      <option value="29">29</option><option value="30">30</option><option value="32">32</option><option value="35">35</option>
+    </select>
+    <label class="lbl" for="i_pdLen">Period duration</label>
+    <select class="inp" id="i_pdLen">
+      <option value="3">3 days</option><option value="4">4</option>
+      <option value="5" selected>5 days</option><option value="6">6</option><option value="7">7</option>
+    </select>
+    <button class="btn btn-gold btn-block" onclick="goStep(3)">Continue →</button>
+    <button class="btn btn-ghost btn-block" style="margin-top:6px" onclick="goStep(1)">← Back</button>
+  </div>
+
+  <div class="onb-step" id="step3">
+    <h2 style="font-size:1.6rem;font-weight:300;color:var(--gold);margin-bottom:18px">🍛 Your Preferences</h2>
+    <label class="lbl" for="i_diet">Diet type</label>
+    <select class="inp" id="i_diet">
+      <option value="vegetarian">Vegetarian</option><option value="vegan">Vegan</option>
+      <option value="eggetarian">Eggetarian</option><option value="non-vegetarian">Non-Vegetarian</option>
+    </select>
+    <label class="lbl" for="i_fitLvl">Fitness level</label>
+    <select class="inp" id="i_fitLvl">
+      <option value="beginner">Beginner</option><option value="intermediate" selected>Intermediate</option><option value="advanced">Advanced</option>
+    </select>
+    <div class="chk-row"><input type="checkbox" id="i_pcos"><label for="i_pcos">PCOS Mode — Low-GI, anti-inflammatory protocol 💜</label></div>
+    <div class="mode-toggle-group">
+      <span style="font-size:0.76rem;color:var(--textSub);align-self:center">Special modes:</span>
+      <button class="mode-toggle" id="i_pregnancyBtn" onclick="toggleOnboardMode('pregnancy')">🤰 Pregnancy</button>
+      <button class="mode-toggle" id="i_fertilityBtn" onclick="toggleOnboardMode('fertility')">🌱 Fertility</button>
+    </div>
+    <button class="btn btn-gold btn-block" onclick="goStep(4)">Continue →</button>
+    <button class="btn btn-ghost btn-block" style="margin-top:6px" onclick="goStep(2)">← Back</button>
+  </div>
+
+  <div class="onb-step" id="step4">
+    <h2 style="font-size:1.6rem;font-weight:300;color:var(--gold);margin-bottom:18px">👤 Create Account</h2>
+    <label class="lbl" for="i_name">Your name</label>
+    <input type="text" class="inp" id="i_name" placeholder="e.g. Priya Sharma" autocomplete="name">
+    <label class="lbl" for="i_email">Email address</label>
+    <input type="email" class="inp" id="i_email" placeholder="your@email.com" autocomplete="email">
+    <label class="lbl" for="i_pass">Password (min 6 characters)</label>
+    <input type="password" class="inp" id="i_pass" placeholder="••••••••" autocomplete="new-password" minlength="6">
+    <div class="form-err" id="regErr"></div>
+    <div class="chk-row"><input type="checkbox" id="i_priv"><label for="i_priv">I agree to the <a href="#" style="color:var(--gold)">Privacy Policy</a> & Terms</label></div>
+    <button class="btn btn-gold btn-block" id="regBtn" onclick="doRegister()">Create Account ✨</button>
+    <button class="btn btn-google btn-block" style="margin-top:8px" onclick="doGoogleAuth()">
+      <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+      Continue with Google
+    </button>
+    <button class="btn btn-ghost btn-block" style="margin-top:6px" onclick="goStep(3)">← Back</button>
+    <p style="text-align:center;margin-top:14px;font-size:0.8rem;color:var(--textMuted)">Already have an account? <a href="#" style="color:var(--gold)" onclick="showLogin()">Sign In</a></p>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div class="app" id="appWrap">
+  <header class="hdr" role="banner">
+    <div class="hdr-brand">
+      <div class="hdr-logo" aria-label="LUNARA">🌙 LUNARA</div>
+      <div class="hdr-tagline">THE MOON WITHIN YOU</div>
+    </div>
+    <div class="hdr-btns">
+      <span class="streak-badge" id="streakBadge" aria-label="Streak">🔥 0</span>
+      <button class="btn btn-ghost btn-sm" onclick="goScreen('settings')" aria-label="Settings">⚙️</button>
+    </div>
+  </header>
+
+  <main id="mainContent" class="content">
+
+    <!-- HOME -->
+    <div class="screen on" id="scrHome">
+      <div id="guestBannerApp" style="display:none" class="guest-banner">
+        👋 Guest mode — <button class="btn btn-gold btn-sm" onclick="showLogin()">Sign In</button> to sync your data
+      </div>
+
+      <div id="homePill" class="pill pill-follicular" style="margin-bottom:14px"></div>
+
+      <div class="phase-ring-wrap">
+        <svg viewBox="0 0 220 220" aria-hidden="true">
+          <circle cx="110" cy="110" r="90" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="14"/>
+          <circle id="arcM" cx="110" cy="110" r="90" fill="none" stroke="#c084fc" stroke-width="14" stroke-dasharray="0 565" stroke-linecap="round" opacity="0.85"/>
+          <circle id="arcF" cx="110" cy="110" r="90" fill="none" stroke="#38bdf8" stroke-width="14" stroke-dasharray="0 565" stroke-linecap="round" opacity="0.85"/>
+          <circle id="arcO" cx="110" cy="110" r="90" fill="none" stroke="#fbbf24" stroke-width="14" stroke-dasharray="0 565" stroke-linecap="round" opacity="0.85"/>
+          <circle id="arcL" cx="110" cy="110" r="90" fill="none" stroke="#fb7185" stroke-width="14" stroke-dasharray="0 565" stroke-linecap="round" opacity="0.85"/>
+          <circle id="curDot" cx="110" cy="20" r="9" fill="var(--gold)" stroke="var(--ink)" stroke-width="3"/>
+          <circle id="curDotGlow" cx="110" cy="20" r="14" fill="rgba(232,197,106,0.25)" stroke="none"/>
+        </svg>
+        <div class="ring-center">
+          <div class="ring-day" id="ringDay">1</div>
+          <div class="ring-phase" id="ringPhase">DAY</div>
+          <div class="ring-date" id="ringDate"></div>
+        </div>
+      </div>
+
+      <div class="phase-grid" id="phaseGrid" role="tablist">
+        <div class="phase-cell" data-phase="menstrual" tabindex="0" role="tab" aria-label="Menstrual phase"><div class="phase-emoji">🌑</div><div class="phase-name">Menstrual</div></div>
+        <div class="phase-cell" data-phase="follicular" tabindex="0" role="tab" aria-label="Follicular phase"><div class="phase-emoji">🌒</div><div class="phase-name">Follicular</div></div>
+        <div class="phase-cell" data-phase="ovulation" tabindex="0" role="tab" aria-label="Ovulation phase"><div class="phase-emoji">🌕</div><div class="phase-name">Ovulation</div></div>
+        <div class="phase-cell" data-phase="luteal" tabindex="0" role="tab" aria-label="Luteal phase"><div class="phase-emoji">🌘</div><div class="phase-name">Luteal</div></div>
+      </div>
+
+      <div class="insight-card" id="insightCard">
+        <div class="ai-loading" id="insightLoading"><span>✦</span> Reading your cycle <div class="ai-dots"><span></span><span></span><span></span></div></div>
+        <div id="insightContent" style="display:none">
+          <div class="insight-title" id="insTitle"></div>
+          <div class="insight-body" id="insBody"></div>
+          <div class="affirm-box" id="insAffirm"></div>
+        </div>
+      </div>
+
+      <!-- Next Period Prediction -->
+      <div class="prediction-card">
+        <h3 style="margin:0 0 6px;font-size:0.95rem;color:var(--gold)">🔮 Period Predictions</h3>
+        <p style="font-size:0.76rem;color:var(--textMuted);margin-bottom:0">Next 3 cycles</p>
+        <div class="prediction-dates" id="predDates"></div>
+      </div>
+
+      <div class="card">
+        <h3>🍽️ Today Your Body Needs</h3>
+        <div class="body-needs">
+          <div class="need-card"><div class="need-icon">🥗</div><div class="need-title">Nutrition</div><div class="need-text" id="needNut">Loading...</div></div>
+          <div class="need-card"><div class="need-icon">💧</div><div class="need-title">Hydration</div><div class="need-text" id="needHyd">8–10 glasses</div></div>
+          <div class="need-card"><div class="need-icon">🧘</div><div class="need-title">Movement</div><div class="need-text" id="needMov">Loading...</div></div>
+          <div class="need-card"><div class="need-icon">🌙</div><div class="need-title">Moon Link</div><div class="need-text" id="needMoon">Loading...</div></div>
+        </div>
+      </div>
+
+      <!-- Hydration Tracker -->
+      <div class="hydration-container">
+        <div class="hydration-header">
+          <h3 style="margin:0;font-size:0.95rem;color:var(--gold)">💧 Hydration</h3>
+          <span style="font-size:0.76rem;color:var(--textSub)">Goal: 8 glasses</span>
+        </div>
+        <div class="water-cups" id="waterCups" role="group" aria-label="Water intake tracker"></div>
+        <div class="water-progress-bar"><div class="water-progress-fill" id="waterFill" style="width:0%"></div></div>
+        <div class="water-stats"><span id="waterCount">0</span>/8 glasses · <span id="waterPct">0%</span></div>
+      </div>
+
+      <!-- Medication Tracker -->
+      <div class="med-tracker">
+        <h3 style="margin:0 0 10px;font-size:0.95rem;color:var(--gold)">💊 Today's Medications</h3>
+        <div id="medList"></div>
+      </div>
+
+      <div class="card">
+        <h3>🌅 Breakfast Preview</h3>
+        <p id="bkPrev" style="color:var(--textSub);font-size:0.85rem;margin-bottom:10px;line-height:1.55"></p>
+        <button class="btn btn-gold btn-sm" onclick="goScreen('meals')">View Full Meal Plan →</button>
+      </div>
+    </div>
+
+    <!-- CYCLE SCREEN -->
+    <div class="screen" id="scrCycle">
+      <h2 style="font-size:1.8rem;font-weight:300;color:var(--gold);margin-bottom:14px">◐ Your Cycle</h2>
+      <div class="mode-toggle-group">
+        <button class="mode-toggle" id="pregnancyModeBtn" onclick="toggleMode('pregnancy')">🤰 Pregnancy</button>
+        <button class="mode-toggle" id="fertilityModeBtn" onclick="toggleMode('fertility')">🌱 Fertility</button>
+      </div>
+      <div class="cycle-stats">
+        <div class="stat-box"><div class="stat-val" id="csDaysLeft">—</div><div class="stat-lbl">Days until period</div></div>
+        <div class="stat-box"><div class="stat-val" id="csCycLen">28</div><div class="stat-lbl">Cycle length</div></div>
+        <div class="stat-box"><div class="stat-val" id="csPdLen">5</div><div class="stat-lbl">Period length</div></div>
+      </div>
+      <div class="card">
+        <h3>⚙️ Update Cycle</h3>
+        <label class="lbl" for="upd_lp">Last period date</label>
+        <input type="date" class="inp" id="upd_lp">
+        <label class="lbl" for="upd_cl">Cycle length (days)</label>
+        <select class="inp" id="upd_cl">
+          <option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="32">32</option><option value="33">33</option><option value="34">34</option><option value="35">35</option>
+        </select>
+        <button class="btn btn-gold" onclick="doCycleUpdate()">Save Changes</button>
+      </div>
+      <div class="card">
+        <h3>💜 PCOS Mode</h3>
+        <div class="toggle-wrap">
+          <div class="toggle" id="pcosToggle" onclick="doPCOSToggle()" tabindex="0" role="switch" aria-checked="false" aria-label="Toggle PCOS mode"></div>
+          <div>
+            <div style="font-weight:500;font-size:0.88rem">PCOS Protocol</div>
+            <div style="font-size:0.75rem;color:var(--textSub)">Low-GI meals, anti-inflammatory focus, supplements</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>💊 Medications & Supplements</h3>
+        <label class="lbl" for="medName">Medication name</label>
+        <input type="text" class="inp" id="medName" placeholder="e.g. Metformin, Inositol, Vitamin D">
+        <label class="lbl" for="medTime">Time of day</label>
+        <select class="inp" id="medTime">
+          <option value="morning">Morning</option><option value="afternoon">Afternoon</option><option value="evening">Evening</option><option value="bedtime">Bedtime</option>
+        </select>
+        <button class="btn btn-gold btn-sm" onclick="addMedication()">Add Medication</button>
+        <div id="medListFull" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- MEALS SCREEN -->
+    <div class="screen" id="scrMeals">
+      <h2 style="font-size:1.8rem;font-weight:300;color:var(--gold);margin-bottom:8px">🍛 Today's Meals</h2>
+      <div id="pcosMealBadge" style="display:none;margin-bottom:12px"><span class="pill pill-menstrual">🩺 PCOS Protocol Active</span></div>
+      <div class="hydration-container" style="margin-bottom:12px">
+        <div class="hydration-header"><h3 style="margin:0;font-size:0.9rem;color:var(--gold)">💧 Hydration</h3></div>
+        <div class="water-progress-bar"><div class="water-progress-fill" id="waterFillMeals" style="width:0%"></div></div>
+        <div class="water-stats"><span id="waterCountMeals">0</span>/8 glasses</div>
+      </div>
+      <div id="mealsWrap"></div>
+      <div class="card" style="margin-top:6px"><h3>🚫 Avoid Today</h3><ul class="avoid-list" id="avoidList"></ul></div>
+    </div>
+
+    <!-- FITNESS SCREEN -->
+    <div class="screen" id="scrFitness">
+      <h2 style="font-size:1.8rem;font-weight:300;color:var(--gold);margin-bottom:14px">⚡ Fitness Protocol</h2>
+      <div class="phase-wisdom" id="fitnessWisdom"></div>
+      <div class="card" style="margin-bottom:12px">
+        <h3>Energy Forecast</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:0.82rem;color:var(--textSub)" id="energyLabel">Moderate</span>
+          <span style="font-weight:700;color:var(--gold)" id="energyPct">50%</span>
+        </div>
+        <div class="energy-bar"><div class="energy-fill" id="energyBar" style="width:50%"></div></div>
+      </div>
+      <div id="workoutsWrap"></div>
+      <div class="challenge-card" id="challengeCard">
+        <div class="challenge-header">
+          <h3 style="margin:0;font-size:0.95rem;color:var(--gold)">🗓️ 30-Day Challenge</h3>
+          <span class="pill pill-gold">Day <span id="challengeDay">1</span>/30</span>
+        </div>
+        <div class="challenge-progress"><div class="challenge-progress-fill" id="challengeProgress" style="width:3%"></div></div>
+        <p id="challengeTask" style="color:var(--textSub);font-size:0.8rem;margin:8px 0"></p>
+        <div id="challengeDayMarkers" style="display:flex;flex-wrap:wrap;gap:2px;margin-top:8px"></div>
+        <button class="btn btn-gold btn-sm" style="margin-top:10px" onclick="doCompleteChallengeDay()">✅ Mark Complete</button>
+      </div>
+      <div class="card">
+        <h3>🚫 Exercises to Avoid</h3>
+        <ul class="avoid-list" id="avoidExList"></ul>
+      </div>
+      <div class="card">
+        <h3>📝 Log Workout</h3>
+        <select class="inp" id="log_wk"><option value="">Select workout</option></select>
+        <label class="lbl" for="log_dur">Duration (minutes)</label>
+        <input type="number" class="inp" id="log_dur" placeholder="45" min="5" max="300">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label class="lbl" for="log_engB">Energy before (1-10)</label><input type="number" class="inp" id="log_engB" min="1" max="10" placeholder="5"></div>
+          <div><label class="lbl" for="log_engA">Energy after (1-10)</label><input type="number" class="inp" id="log_engA" min="1" max="10" placeholder="7"></div>
+        </div>
+        <button class="btn btn-gold" onclick="doLogWorkout()">Log Workout 💪</button>
+      </div>
+    </div>
+
+    <!-- WELLNESS SCREEN -->
+    <div class="screen" id="scrWellness">
+      <h2 style="font-size:1.8rem;font-weight:300;color:var(--gold);margin-bottom:14px">📋 Wellness Tracker</h2>
+      <div class="wellness-grid" id="wellnessGrid">
+        <div class="wellness-item" onclick="toggleWellness('symptoms')" tabindex="0" role="button"><div class="wellness-icon">🤒</div><div class="wellness-name">Symptoms</div></div>
+        <div class="wellness-item" onclick="toggleWellness('sleep')" tabindex="0" role="button"><div class="wellness-icon">😴</div><div class="wellness-name">Sleep</div></div>
+        <div class="wellness-item" onclick="toggleWellness('cravings')" tabindex="0" role="button"><div class="wellness-icon">🍫</div><div class="wellness-name">Cravings</div></div>
+        <div class="wellness-item" onclick="toggleWellness('skin')" tabindex="0" role="button"><div class="wellness-icon">✨</div><div class="wellness-name">Skin</div></div>
+        <div class="wellness-item" onclick="toggleWellness('stress')" tabindex="0" role="button"><div class="wellness-icon">🧘</div><div class="wellness-name">Stress</div></div>
+        <div class="wellness-item" onclick="toggleWellness('energy')" tabindex="0" role="button"><div class="wellness-icon">⚡</div><div class="wellness-name">Energy</div></div>
+        <div class="wellness-item" onclick="toggleWellness('meditation')" tabindex="0" role="button"><div class="wellness-icon">🧎</div><div class="wellness-name">Meditation</div></div>
+        <div class="wellness-item" onclick="toggleWellness('flow')" tabindex="0" role="button"><div class="wellness-icon">🩸</div><div class="wellness-name">Flow</div></div>
+      </div>
+      <div id="wellnessForm" style="display:none" class="card"></div>
+      <div class="card"><h3>📋 Today's Log</h3><div id="wellnessSummary"></div></div>
+    </div>
+
+    <!-- JOURNAL SCREEN -->
+    <div class="screen" id="scrJournal">
+      <h2 style="font-size:1.8rem;font-weight:300;color:var(--gold);margin-bottom:14px">📓 Inner Journal</h2>
+      <div class="card">
+        <h3>How are you feeling?</h3>
+        <div class="mood-buttons" role="group" aria-label="Mood selection">
+          <button class="mood-btn" onclick="pickMood(1,'Flowing')" aria-label="Mood: Flowing">🌊</button>
+          <button class="mood-btn" onclick="pickMood(2,'Energised')" aria-label="Mood: Energised">⚡</button>
+          <button class="mood-btn" onclick="pickMood(3,'Tender')" aria-label="Mood: Tender">💜</button>
+          <button class="mood-btn" onclick="pickMood(4,'Reflective')" aria-label="Mood: Reflective">🌙</button>
+          <button class="mood-btn" onclick="pickMood(5,'Stormy')" aria-label="Mood: Stormy">⛈️</button>
+        </div>
+        <p id="moodLabel" style="text-align:center;color:var(--gold);font-weight:500;font-size:0.88rem;min-height:20px"></p>
+      </div>
+      <div class="card">
+        <h3>Today's Reflection</h3>
+        <p id="jPrompt" style="color:var(--textSub);font-family:'Cormorant Garamond',serif;font-style:italic;font-size:0.96rem;margin-bottom:12px;line-height:1.55"></p>
+        <label class="sr-only" for="jText">Your journal entry</label>
+        <textarea class="inp" id="jText" rows="5" placeholder="Write freely… this space belongs only to you."></textarea>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <button class="btn btn-gold btn-sm" onclick="doSaveJournal()">Save Entry ✦</button>
+          <span style="font-size:0.72rem;color:var(--textMuted)">✦ AI will analyse your entry</span>
+        </div>
+      </div>
+      <div id="journalEntries"></div>
+    </div>
+
+    <!-- ANALYTICS SCREEN -->
+    <div class="screen" id="scrAnalytics">
+      <h2 style="font-size:1.8rem;font-weight:300;color:var(--gold);margin-bottom:14px">📊 Your Insights</h2>
+      <div class="stats-grid" id="statsGrid"></div>
+      <div class="ml-insight"><div class="ml-badge">⚡ Pattern Analysis</div><div id="mlInsightText"></div></div>
+      <!-- Symptom correlation -->
+      <div class="card" id="correlationCard" style="display:none">
+        <h3>🔗 Symptom Patterns</h3>
+        <div id="correlationData"></div>
+      </div>
+      <div class="chart-container">
+        <h3>Mood by Phase</h3>
+        <div class="chart-wrap"><canvas id="chartMood"></canvas></div>
+      </div>
+      <div class="chart-container">
+        <h3>Energy Patterns</h3>
+        <div class="chart-wrap"><canvas id="chartEnergy"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>🔮 AI Wellness Report</h3>
+        <div id="patternReport"><p style="color:var(--textMuted);font-size:0.84rem;font-style:italic">Click the button below to generate your personalised AI wellness report using Gemini.</p></div>
+        <button class="btn btn-gold btn-sm" id="aiReportBtn" style="margin-top:10px" onclick="doGenReport()">✦ Generate My AI Report</button>
+      </div>
+    </div>
+
+    <!-- SHOP SCREEN -->
+    <div class="screen" id="scrShop">
+      <h2 style="font-size:1.8rem;font-weight:300;color:var(--gold);margin-bottom:6px">✿ Period Care Shop</h2>
+      <p style="color:var(--textSub);font-size:0.82rem;margin-bottom:14px">Everything you need for comfortable, confident periods — delivered to your door</p>
+      <div class="shop-filter" id="shopFilter">
+        <button class="shop-filter-btn active" onclick="filterShop('all',this)">All</button>
+        <button class="shop-filter-btn" onclick="filterShop('pads',this)">🩸 Pads & Liners</button>
+        <button class="shop-filter-btn" onclick="filterShop('eco',this)">🌿 Eco Options</button>
+        <button class="shop-filter-btn" onclick="filterShop('pain',this)">💆 Pain Relief</button>
+        <button class="shop-filter-btn" onclick="filterShop('hygiene',this)">✨ Hygiene</button>
+      </div>
+      <div class="cart-summary" id="cartSummary" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-weight:500;margin-bottom:2px">🛒 Cart (<span id="cartCount">0</span>)</div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:1.2rem;color:var(--gold)" id="cartTotal">₹0</div>
+          </div>
+          <button class="btn btn-gold btn-sm" onclick="openCheckout()">Checkout →</button>
+        </div>
+      </div>
+      <div class="shop-grid" id="shopGrid"></div>
+    </div>
+
+    <!-- SETTINGS SCREEN -->
+    <div class="screen" id="scrSettings">
+      <h2 style="font-size:1.8rem;font-weight:300;color:var(--gold);margin-bottom:14px">☽ Settings</h2>
+      <div class="card">
+        <h3>👤 Account</h3>
+        <div class="settings-row"><div><div class="settings-label" id="setName">—</div><div class="settings-sub">Name</div></div></div>
+        <div class="settings-row"><div><div class="settings-label" id="setEmail">—</div><div class="settings-sub">Email</div></div></div>
+        <div class="settings-row"><div><div class="settings-label" id="setDiet">—</div><div class="settings-sub">Diet</div></div></div>
+        <div class="settings-row"><div><div class="settings-label" id="setPcos">—</div><div class="settings-sub">PCOS Mode</div></div></div>
+        <button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="doLogout()">Sign Out</button>
+      </div>
+      <div class="card">
+        <h3>🔒 Security</h3>
+        <button class="btn btn-outline btn-sm btn-block" onclick="doPasswordReset()">Reset Password via Email</button>
+        <button class="btn btn-outline btn-sm btn-block" style="margin-top:8px" onclick="doResendVerification()">Resend Verification Email</button>
+        <button class="btn btn-danger btn-sm btn-block" style="margin-top:8px" onclick="doDeleteAccount()">Delete Account</button>
+      </div>
+      <div class="card">
+        <h3>📥 Data</h3>
+        <p style="font-size:0.8rem;color:var(--textSub);margin-bottom:10px">Export all your LUNARA data as JSON.</p>
+        <button class="btn btn-outline btn-sm btn-block" onclick="exportData()">Export My Data</button>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- BOTTOM NAV -->
+  <nav class="nav" aria-label="Main navigation">
+    <div class="nav-item on" data-scr="home" onclick="goScreen('home')" tabindex="0" role="button" aria-label="Home"><span class="nav-icon">🌙</span><span class="nav-lbl">Home</span></div>
+    <div class="nav-item" data-scr="cycle" onclick="goScreen('cycle')" tabindex="0" role="button" aria-label="Cycle"><span class="nav-icon">◐</span><span class="nav-lbl">Cycle</span></div>
+    <div class="nav-item" data-scr="meals" onclick="goScreen('meals')" tabindex="0" role="button" aria-label="Meals"><span class="nav-icon">🍛</span><span class="nav-lbl">Meals</span></div>
+    <div class="nav-item" data-scr="fitness" onclick="goScreen('fitness')" tabindex="0" role="button" aria-label="Fitness"><span class="nav-icon">⚡</span><span class="nav-lbl">Fitness</span></div>
+    <div class="nav-item" data-scr="wellness" onclick="goScreen('wellness')" tabindex="0" role="button" aria-label="Track"><span class="nav-icon">📋</span><span class="nav-lbl">Track</span></div>
+    <div class="nav-item" data-scr="journal" onclick="goScreen('journal')" tabindex="0" role="button" aria-label="Journal"><span class="nav-icon">📓</span><span class="nav-lbl">Journal</span></div>
+    <div class="nav-item" data-scr="analytics" onclick="goScreen('analytics')" tabindex="0" role="button" aria-label="Insights"><span class="nav-icon">📊</span><span class="nav-lbl">Insights</span></div>
+    <div class="nav-item" data-scr="shop" onclick="goScreen('shop')" tabindex="0" role="button" aria-label="Shop"><span class="nav-icon">✿</span><span class="nav-lbl">Shop</span><span class="cart-badge" id="cartBadge"></span></div>
+  </nav>
+</div>
+
+<!-- CHECKOUT MODAL -->
+<div class="modal-overlay" id="checkoutModal" role="dialog" aria-modal="true" aria-label="Checkout">
+  <div class="modal-box">
+    <h2 style="font-size:1.4rem;font-weight:400;color:var(--gold);margin-bottom:14px">🛍️ Checkout</h2>
+    <div id="checkoutItems" style="margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:12px"></div>
+    <div id="checkoutTotal" style="font-family:'Cormorant Garamond',serif;font-size:1.3rem;color:var(--gold);margin-bottom:14px"></div>
+    <label class="lbl" for="co_name">Full name</label>
+    <input type="text" class="inp" id="co_name" placeholder="Your full name" autocomplete="name">
+    <label class="lbl" for="co_addr">Delivery address</label>
+    <textarea class="inp" id="co_addr" rows="3" placeholder="Complete delivery address" autocomplete="street-address"></textarea>
+    <label class="lbl" for="co_phone">Phone number</label>
+    <input type="tel" class="inp" id="co_phone" placeholder="+91 98765 43210" autocomplete="tel">
+    <button class="btn btn-gold btn-block" onclick="doPlaceOrder()">Place Order 🎉</button>
+    <button class="btn btn-ghost btn-block" style="margin-top:8px" onclick="closeModal('checkoutModal')">Cancel</button>
+  </div>
+</div>
+
+<!-- LOGIN MODAL -->
+<div class="modal-overlay" id="loginModal" role="dialog" aria-modal="true" aria-label="Sign In">
+  <div class="modal-box">
+    <h2 style="font-size:1.4rem;font-weight:400;color:var(--gold);margin-bottom:14px">🌙 Sign In to LUNARA</h2>
+    <label class="lbl" for="li_email">Email</label>
+    <input type="email" class="inp" id="li_email" placeholder="your@email.com" autocomplete="email">
+    <label class="lbl" for="li_pass">Password</label>
+    <input type="password" class="inp" id="li_pass" placeholder="••••••••" autocomplete="current-password">
+    <div class="form-err" id="loginErr"></div>
+    <button class="btn btn-gold btn-block" id="loginBtn" onclick="doLogin()">Sign In →</button>
+    <button class="btn btn-google btn-block" style="margin-top:8px" onclick="doGoogleAuth()">
+      <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+      Continue with Google
+    </button>
+    <button class="btn btn-ghost btn-block" style="margin-top:6px" onclick="doPasswordReset()">Forgot Password?</button>
+    <button class="btn btn-ghost btn-block" style="margin-top:4px" onclick="closeModal('loginModal')">Cancel</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- Chart.js loaded synchronously to avoid race conditions -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// LUNARA v3.0 — Fixed, Enhanced Application Logic
+// ═══════════════════════════════════════════════════════════════
+
+window._appState = {
+  user: null,
+  cart: [],
+  selMood: null,
+  water: 0,
+  challengeDay: 1,
+  xp: 0,
+  streak: 0,
+  medications: [],
+  pregnancyMode: false,
+  fertilityMode: false,
+  isGuest: false
+};
+const S = window._appState;
+let _shopRendered = false;
+let _charts = {};
+let _refreshDebounce = null;
+
+// ── PERSISTENCE ────────────────────────────────────────────────
+function _saveLocal() {
+  try { localStorage.setItem('luna_v4', JSON.stringify(S)); } catch(e) { console.warn('Save error:', e); }
+}
+function _loadLocal() {
+  try {
+    const d = JSON.parse(localStorage.getItem('luna_v4') || '{}');
+    if (d && typeof d === 'object') {
+      Object.assign(S, d);
+    }
+  } catch(e) {}
+}
+_loadLocal();
+
+function _lsGet(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } }
+function _lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+
+// ── FIRESTORE SYNC ─────────────────────────────────────────────
+async function _syncToFirestore(collection, data) {
+  if (!S.user?.uid || S.isGuest || !window._fb?.db) return;
+  try {
+    const { db, doc, setDoc } = window._fb;
+    const userDataRef = doc(db, 'users', S.user.uid);
+    await window._fb.updateDoc(userDataRef, { [collection]: data, lastSynced: new Date().toISOString() });
+  } catch(e) {
+    console.warn('Firestore sync failed (offline?):', e);
+  }
+}
+
+async function _syncJournalEntry(entry) {
+  if (!S.user?.uid || S.isGuest || !window._fb?.db) return;
+  try {
+    const { db, collection, addDoc, serverTimestamp } = window._fb;
+    await addDoc(collection(db, 'users', S.user.uid, 'journal'), { ...entry, syncedAt: serverTimestamp() });
+  } catch(e) { console.warn('Journal sync failed:', e); }
+}
+
+async function _syncWellnessEntry(type, value) {
+  if (!S.user?.uid || S.isGuest || !window._fb?.db) return;
+  try {
+    const { db, collection, addDoc, serverTimestamp } = window._fb;
+    await addDoc(collection(db, 'users', S.user.uid, 'wellness'), { type, value, phase: getPhase(getCycDay()), date: new Date().toISOString(), syncedAt: serverTimestamp() });
+  } catch(e) { console.warn('Wellness sync failed:', e); }
+}
+
+// ── GUEST MODE ─────────────────────────────────────────────────
+function startGuestMode() {
+  S.isGuest = true;
+  S.user = {
+    uid: 'guest_' + Date.now(),
+    name: 'Guest',
+    email: '',
+    diet: document.getElementById('i_diet')?.value || 'vegetarian',
+    fit: document.getElementById('i_fitLvl')?.value || 'intermediate',
+    pcos: document.getElementById('i_pcos')?.checked || false,
+    pregnancyMode: onboardPregnancy,
+    fertilityMode: onboardFertility,
+    cycle: {
+      lastPd: document.getElementById('i_lastPd')?.value || new Date().toISOString().split('T')[0],
+      cycLen: parseInt(document.getElementById('i_cycLen')?.value || 28),
+      pdLen: parseInt(document.getElementById('i_pdLen')?.value || 5)
+    },
+    createdAt: new Date().toISOString(),
+    emailVerified: false
+  };
+  _saveLocal();
+  document.getElementById('onbWrap').classList.remove('show');
+  document.getElementById('guestBannerApp').style.display = 'block';
+  _appInit();
+  toast('Guest mode active 👋 Data saves locally only.');
+}
+
+// ── APP INIT ───────────────────────────────────────────────────
+window._appInit = function() {
+  if (!S.user) return;
+  document.getElementById('appWrap').classList.add('show');
+  document.getElementById('onbWrap').classList.remove('show');
+  if (S.isGuest) document.getElementById('guestBannerApp').style.display = 'block';
+  if (_refreshDebounce) clearTimeout(_refreshDebounce);
+  _refreshDebounce = setTimeout(() => {
+    doRefresh();
+    doUpdateStreakUI();
+  }, 100);
+};
+
+// SPLASH + INIT
+setTimeout(() => {
+  const sp = document.getElementById('splash');
+  if (sp) { sp.classList.add('out'); setTimeout(() => sp.style.display = 'none', 1000); }
+  window._handleRedirect?.();
+  if (S.user && S.isGuest) _appInit();
+  else if (!S.user && !window._fb?.auth) {
+    document.getElementById('onbWrap')?.classList.add('show');
+  }
+}, 3800);
+
+// Generate splash stars
+(function() {
+  const container = document.getElementById('splashStars');
+  if (!container) return;
+  for (let i = 0; i < 80; i++) {
+    const s = document.createElement('div');
+    s.className = 'splash-star';
+    const size = Math.random() * 2.5 + 0.5;
+    s.style.cssText = `width:${size}px;height:${size}px;top:${Math.random()*100}%;left:${Math.random()*100}%;animation-delay:${Math.random()*3}s;animation-duration:${2+Math.random()*3}s`;
+    container.appendChild(s);
+  }
+})();
+
+// ── NAVIGATION ─────────────────────────────────────────────────
+function goScreen(scr) {
+  document.querySelectorAll('.screen').forEach(el => el.classList.remove('on'));
+  const key = scr.charAt(0).toUpperCase() + scr.slice(1);
+  const el = document.getElementById('scr' + key);
+  if (el) el.classList.add('on');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('on', n.dataset.scr === scr));
+  const dispatchers = {
+    analytics: doRenderAnalytics,
+    shop: () => { if (!_shopRendered) { doRenderShop(); _shopRendered = true; } doUpdateCartUI(); },
+    journal: doRenderJournalList,
+    fitness: doRenderFitness,
+    meals: doRenderMeals,
+    wellness: doInitWellness
+  };
+  if (dispatchers[scr]) dispatchers[scr]();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── ONBOARDING ─────────────────────────────────────────────────
+let onboardPregnancy = false;
+let onboardFertility = false;
+
+function goStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    document.getElementById('step' + i)?.classList.toggle('on', i === n);
+  }
+  document.getElementById('onbFill').style.width = (n * 25) + '%';
+}
+
+function toggleOnboardMode(mode) {
+  if (mode === 'pregnancy') { onboardPregnancy = !onboardPregnancy; document.getElementById('i_pregnancyBtn').classList.toggle('active', onboardPregnancy); }
+  else { onboardFertility = !onboardFertility; document.getElementById('i_fertilityBtn').classList.toggle('active', onboardFertility); }
+}
+
+// ── AUTH ───────────────────────────────────────────────────────
+async function doRegister() {
+  const btn = document.getElementById('regBtn');
+  const name = document.getElementById('i_name')?.value?.trim() || '';
+  const email = document.getElementById('i_email')?.value?.trim() || '';
+  const pass = document.getElementById('i_pass')?.value || '';
+  const priv = document.getElementById('i_priv')?.checked;
+  const errEl = document.getElementById('regErr');
+
+  errEl.classList.remove('show');
+  if (!name || !email || !pass) return showErr(errEl, 'Please fill all fields.');
+  if (pass.length < 6) return showErr(errEl, 'Password must be at least 6 characters.');
+  if (!priv) return toast('Please agree to the Privacy Policy');
+
+  btn.disabled = true; btn.textContent = 'Creating account…';
+
+  const userData = {
+    name, email,
+    diet: document.getElementById('i_diet')?.value || 'vegetarian',
+    fit: document.getElementById('i_fitLvl')?.value || 'intermediate',
+    pcos: document.getElementById('i_pcos')?.checked || false,
+    pregnancyMode: onboardPregnancy, fertilityMode: onboardFertility,
+    notifications: true,
+    cycle: {
+      lastPd: document.getElementById('i_lastPd')?.value || new Date().toISOString().split('T')[0],
+      cycLen: parseInt(document.getElementById('i_cycLen')?.value || 28),
+      pdLen: parseInt(document.getElementById('i_pdLen')?.value || 5)
+    },
+    createdAt: new Date().toISOString()
+  };
+
+  try {
+    const { createUserWithEmailAndPassword, sendEmailVerification, setDoc, doc, auth, db } = window._fb;
+    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    try { await sendEmailVerification(auth.currentUser); } catch {}
+    await setDoc(doc(db, 'users', cred.user.uid), userData);
+    S.user = { ...userData, uid: cred.user.uid, emailVerified: false };
+    S.isGuest = false; _saveLocal();
+    document.getElementById('onbWrap')?.classList.remove('show');
+    toast('Account created! Check your email to verify 📧');
+    _appInit();
+  } catch(e) {
+    const msgs = { 'auth/email-already-in-use':'Email already registered.', 'auth/invalid-email':'Invalid email.', 'auth/weak-password':'Password too weak.' };
+    showErr(errEl, msgs[e.code] || e.message || 'Registration failed.');
+  }
+  btn.disabled = false; btn.textContent = 'Create Account ✨';
+}
+
+async function doGoogleAuth() {
+  if (!window._fb?.auth) return toast('Google sign-in unavailable.');
+  try {
+    const result = await window._fb.signInWithPopup(window._fb.auth, window._fb.googleProvider);
+    toast('Welcome! 🌙');
+  } catch(e) {
+    if (e.code === 'auth/popup-blocked') {
+      await window._fb.signInWithRedirect(window._fb.auth, window._fb.googleProvider);
+    } else if (e.code !== 'auth/popup-closed-by-user') {
+      toast(e.code === 'auth/network-request-failed' ? 'Network error.' : 'Google sign-in failed.');
+    }
+  }
+}
+
+async function doLogin() {
+  const btn = document.getElementById('loginBtn');
+  const email = document.getElementById('li_email')?.value?.trim() || '';
+  const pass = document.getElementById('li_pass')?.value || '';
+  const errEl = document.getElementById('loginErr');
+  errEl.classList.remove('show');
+  if (!email || !pass) return showErr(errEl, 'Fill email and password.');
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    await window._fb.signInWithEmailAndPassword(window._fb.auth, email, pass);
+    closeModal('loginModal');
+    toast('Welcome back! 🌙');
+  } catch(e) {
+    const msgs = { 'auth/user-not-found':'No account found.', 'auth/wrong-password':'Incorrect password.', 'auth/invalid-credential':'Invalid email or password.', 'auth/invalid-email':'Invalid email.' };
+    showErr(errEl, msgs[e.code] || 'Sign in failed.');
+  }
+  btn.disabled = false; btn.textContent = 'Sign In →';
+}
+
+function showLogin() { document.getElementById('loginModal')?.classList.add('on'); }
+
+async function doPasswordReset() {
+  const email = document.getElementById('li_email')?.value?.trim() || S.user?.email || '';
+  if (!email) return toast('Enter your email first');
+  try { await window._fb.sendPasswordResetEmail(window._fb.auth, email); toast('Reset email sent! Check your inbox.'); }
+  catch(e) { toast('Error: ' + (e.message || 'Failed')); }
+}
+
+async function doResendVerification() {
+  try {
+    if (window._fb?.auth?.currentUser) { await window._fb.sendEmailVerification(window._fb.auth.currentUser); toast('Verification email sent!'); }
+  } catch(e) { toast('Error: ' + e.message); }
+}
+
+async function doDeleteAccount() {
+  if (!confirm('Permanently delete your account? This cannot be undone.')) return;
+  try {
+    if (window._fb?.auth?.currentUser) {
+      try { await window._fb.deleteDoc(window._fb.doc(window._fb.db, 'users', window._fb.auth.currentUser.uid)); } catch {}
+      await window._fb.deleteUser(window._fb.auth.currentUser);
+    }
+    S.user = null; S.isGuest = false; _saveLocal();
+    localStorage.clear(); location.reload();
+  } catch(e) { toast('Error: ' + (e.message || 'Failed. Please re-login first.')); }
+}
+
+async function doLogout() {
+  try { if (window._fb?.auth?.currentUser) await window._fb.signOut(window._fb.auth); } catch {}
+  S.user = null; S.isGuest = false; _saveLocal(); location.reload();
+}
+
+function showErr(el, msg) { el.textContent = msg; el.classList.add('show'); toast(msg); }
+
+// ── CYCLE HELPERS ──────────────────────────────────────────────
+function getCycDay() {
+  if (!S.user?.cycle?.lastPd) return 1;
+  const diff = Math.floor((Date.now() - new Date(S.user.cycle.lastPd)) / 86400000);
+  const cl = S.user.cycle.cycLen || 28;
+  return ((diff % cl) + cl) % cl + 1;
+}
+function getPhase(day) {
+  const pl = S.user?.cycle?.pdLen || 5;
+  const d = day || getCycDay();
+  if (d <= pl) return 'menstrual';
+  if (d <= 13) return 'follicular';
+  if (d <= 16) return 'ovulation';
+  return 'luteal';
+}
+
+function getEffectivePhase() {
+  if (S.pregnancyMode) return 'pregnancy';
+  if (S.fertilityMode) return 'fertility';
+  return getPhase(getCycDay());
+}
+
+const PHASE_META = {
+  menstrual:  { pill:'pill-menstrual',  label:'🌑 Menstrual',  emoji:'🌑', color:'#c084fc' },
+  follicular: { pill:'pill-follicular', label:'🌒 Follicular', emoji:'🌒', color:'#38bdf8' },
+  ovulation:  { pill:'pill-ovulation',  label:'🌕 Ovulation',  emoji:'🌕', color:'#fbbf24' },
+  luteal:     { pill:'pill-luteal',     label:'🌘 Luteal',     emoji:'🌘', color:'#fb7185' },
+  pregnancy:  { pill:'pill-success',    label:'🤰 Pregnancy',  emoji:'🤰', color:'#34d399' },
+  fertility:  { pill:'pill-gold',       label:'🌱 Fertility',  emoji:'🌱', color:'#e8c56a' }
+};
+
+// ── PERIOD PREDICTIONS ─────────────────────────────────────────
+function renderPredictions() {
+  const el = document.getElementById('predDates');
+  if (!el || !S.user?.cycle?.lastPd) return;
+  const cl = S.user.cycle.cycLen || 28;
+  const day = getCycDay();
+  const lastPd = new Date(S.user.cycle.lastPd);
+  const html = [1, 2, 3].map(n => {
+    const nextDate = new Date(lastPd.getTime() + (n * cl * 86400000));
+    const daysAway = Math.round((nextDate - new Date()) / 86400000);
+    const label = daysAway === 0 ? 'Today' : daysAway < 0 ? `${Math.abs(daysAway)}d ago` : `in ${daysAway}d`;
+    return `<div class="pred-date"><div class="pred-cycle">Cycle ${n}</div><div class="pred-value">${nextDate.toLocaleDateString('en-IN', {day:'numeric',month:'short'})}</div><div style="font-size:0.68rem;color:var(--textMuted)">${label}</div></div>`;
+  }).join('');
+  el.innerHTML = html;
+}
+
+// ── HYDRATION ──────────────────────────────────────────────────
+function doInitHydration() {
+  const cups = document.getElementById('waterCups');
+  if (!cups) return;
+  cups.innerHTML = '';
+  for (let i = 1; i <= 8; i++) {
+    const cup = document.createElement('div');
+    cup.className = 'water-cup' + (i <= S.water ? ' filled' : '');
+    cup.innerHTML = `<span>${i}</span>`;
+    cup.setAttribute('tabindex', '0');
+    cup.setAttribute('role', 'button');
+    cup.setAttribute('aria-label', `Water glass ${i}${i <= S.water ? ' (filled)' : ''}`);
+    cup.onclick = () => { S.water = S.water === i ? i - 1 : i; _saveLocal(); doUpdateHydrationUI(); };
+    cup.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') cup.click(); };
+    cups.appendChild(cup);
+  }
+  doUpdateHydrationUI();
+}
+
+function doUpdateHydrationUI() {
+  const pct = Math.round((S.water / 8) * 100);
+  ['#waterFill','#waterFillMeals'].forEach(id => {
+    const el = document.querySelector(id);
+    if (el) el.style.width = pct + '%';
+  });
+  const wc = document.getElementById('waterCount'); if (wc) wc.textContent = S.water;
+  const wcm = document.getElementById('waterCountMeals'); if (wcm) wcm.textContent = S.water;
+  const wp = document.getElementById('waterPct'); if (wp) wp.textContent = pct + '%';
+  document.querySelectorAll('.water-cup').forEach((cup, i) => {
+    cup.classList.toggle('filled', i < S.water);
+  });
+}
+
+// ── CHALLENGE ──────────────────────────────────────────────────
+function getChallengeRoute() {
+  const ph = getPhase(getCycDay());
+  const routes = {
+    menstrual: ['Restorative Yoga','Gentle Walk','Full Rest Day','Light Stretching','Yin Yoga'],
+    follicular: ['Full Body Strength','HIIT Sprints','Dance Cardio','Core Workout','Circuit Training'],
+    ovulation: ['Peak HIIT','Personal Best Lifts','Trail Run','Power Yoga','Sprint Intervals'],
+    luteal: ['Pilates','Swimming','Light Strength','Yoga Flow','Walk + Stretch']
+  };
+  const base = routes[ph];
+  return Array.from({ length: 30 }, (_, i) => base[i % base.length] + ` (Day ${i + 1})`);
+}
+
+function doUpdateChallengeUI() {
+  const route = getChallengeRoute();
+  const day = Math.min(S.challengeDay, 30);
+  const cdEl = document.getElementById('challengeDay'); if (cdEl) cdEl.textContent = day;
+  const cpEl = document.getElementById('challengeProgress'); if (cpEl) cpEl.style.width = ((day / 30) * 100) + '%';
+  const ctEl = document.getElementById('challengeTask'); if (ctEl) ctEl.textContent = route[day - 1] || 'Rest day';
+  const markers = document.getElementById('challengeDayMarkers');
+  if (!markers) return;
+  markers.innerHTML = '';
+  for (let i = 0; i < 30; i++) {
+    const m = document.createElement('span');
+    m.className = 'day-marker';
+    if (i + 1 < day) m.classList.add('completed');
+    if (i + 1 === day) m.classList.add('today');
+    m.textContent = i + 1;
+    markers.appendChild(m);
+  }
+}
+
+function doCompleteChallengeDay() {
+  if (S.challengeDay < 30) {
+    S.challengeDay++; S.xp += 10; _saveLocal();
+    doUpdateChallengeUI(); doUpdateStreakUI();
+    toast(`🎉 Day ${S.challengeDay - 1} done! +10 XP`);
+  } else { toast('🏆 30-Day Challenge complete! You are incredible!'); }
+}
+
+// ── STREAK ─────────────────────────────────────────────────────
+function doUpdateStreakUI() {
+  const today = new Date().toISOString().split('T')[0];
+  const last = _lsGet('luna_last') || '';
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  if (last !== today) {
+    S.streak = last === yesterday ? (S.streak || 0) + 1 : 1;
+    _lsSet('luna_last', today); _saveLocal();
+  }
+  const el = document.getElementById('streakBadge');
+  if (el) el.textContent = '🔥 ' + (S.streak || 0);
+}
+
+// ── MEDICATION ─────────────────────────────────────────────────
+function addMedication() {
+  const name = document.getElementById('medName')?.value?.trim();
+  const time = document.getElementById('medTime')?.value;
+  if (!name) return toast('Enter medication name');
+  S.medications = S.medications || [];
+  S.medications.push({ id: Date.now(), name, time, added: new Date().toISOString() });
+  _saveLocal();
+  _syncToFirestore('medications', S.medications);
+  doUpdateMedUI();
+  document.getElementById('medName').value = '';
+  toast(`${name} added 💊`);
+}
+
+function removeMed(id) {
+  S.medications = (S.medications || []).filter(m => m.id !== id);
+  _saveLocal(); _syncToFirestore('medications', S.medications); doUpdateMedUI();
+}
+
+function doUpdateMedUI() {
+  const meds = S.medications || [];
+  const timeEmoji = { morning:'☀️', afternoon:'🌤️', evening:'🌆', bedtime:'🌙' };
+  const makeHtml = (forFull) => meds.length
+    ? meds.map(m => `<div class="med-item"><div class="med-dot"></div><div class="med-info"><div class="med-name-text">${m.name}</div><div class="med-time-text">${timeEmoji[m.time] || '⏰'} ${m.time}</div></div><button class="btn btn-ghost btn-sm" onclick="removeMed(${m.id})" aria-label="Remove ${m.name}">✕</button></div>`).join('')
+    : '<p style="color:var(--textMuted);font-size:0.8rem">No medications scheduled. Add below.</p>';
+  const list = document.getElementById('medList'); if (list) list.innerHTML = makeHtml(false);
+  const listFull = document.getElementById('medListFull'); if (listFull) listFull.innerHTML = makeHtml(true);
+}
+
+// ── MODE TOGGLES ───────────────────────────────────────────────
+function toggleMode(mode) {
+  if (mode === 'pregnancy') {
+    S.pregnancyMode = !S.pregnancyMode;
+    if (S.user) S.user.pregnancyMode = S.pregnancyMode;
+    document.getElementById('pregnancyModeBtn').classList.toggle('active', S.pregnancyMode);
+    toast(S.pregnancyMode ? 'Pregnancy mode activated 🤰' : 'Pregnancy mode off');
+  } else {
+    S.fertilityMode = !S.fertilityMode;
+    if (S.user) S.user.fertilityMode = S.fertilityMode;
+    document.getElementById('fertilityModeBtn').classList.toggle('active', S.fertilityMode);
+    toast(S.fertilityMode ? 'Fertility tracking activated 🌱' : 'Fertility mode off');
+  }
+  _saveLocal();
+  _syncToFirestore('modes', { pregnancyMode: S.pregnancyMode, fertilityMode: S.fertilityMode });
+}
+
+// ── WELLNESS TRACKER ───────────────────────────────────────────
+function toggleWellness(type) {
+  const form = document.getElementById('wellnessForm');
+  const forms = {
+    symptoms: `<h3 style="font-size:0.95rem;margin-bottom:8px">🤒 Symptoms</h3><label class="lbl">Symptoms today</label><input class="inp" id="w_symptoms" placeholder="e.g. cramps, headache, bloating"><button class="btn btn-gold btn-sm" onclick="saveWellness('symptoms')">Save</button>`,
+    sleep: `<h3 style="font-size:0.95rem;margin-bottom:8px">😴 Sleep</h3><label class="lbl">Hours slept</label><input type="number" class="inp" id="w_sleep" placeholder="7" min="0" max="24" step="0.5"><button class="btn btn-gold btn-sm" onclick="saveWellness('sleep')">Save</button>`,
+    cravings: `<h3 style="font-size:0.95rem;margin-bottom:8px">🍫 Cravings</h3><label class="lbl">What are you craving?</label><input class="inp" id="w_cravings" placeholder="e.g. chocolate, salty, sweet"><button class="btn btn-gold btn-sm" onclick="saveWellness('cravings')">Save</button>`,
+    skin: `<h3 style="font-size:0.95rem;margin-bottom:8px">✨ Skin</h3><select class="inp" id="w_skin"><option value="clear">Clear</option><option value="breakout">Breakout</option><option value="dry">Dry</option><option value="oily">Oily</option><option value="glowing">Glowing</option></select><button class="btn btn-gold btn-sm" onclick="saveWellness('skin')">Save</button>`,
+    stress: `<h3 style="font-size:0.95rem;margin-bottom:8px">🧘 Stress (1-10)</h3><input type="range" class="inp" id="w_stress" min="1" max="10" value="5" oninput="document.getElementById('stressVal').textContent=this.value"><div id="stressVal" style="text-align:center;font-size:1.2rem;color:var(--gold);margin-bottom:8px">5</div><button class="btn btn-gold btn-sm" onclick="saveWellness('stress')">Save</button>`,
+    energy: `<h3 style="font-size:0.95rem;margin-bottom:8px">⚡ Energy (1-10)</h3><input type="range" class="inp" id="w_energy" min="1" max="10" value="5" oninput="document.getElementById('energyVal').textContent=this.value"><div id="energyVal" style="text-align:center;font-size:1.2rem;color:var(--gold);margin-bottom:8px">5</div><button class="btn btn-gold btn-sm" onclick="saveWellness('energy')">Save</button>`,
+    meditation: `<h3 style="font-size:0.95rem;margin-bottom:8px">🧎 Meditation</h3><label class="lbl">Minutes</label><input type="number" class="inp" id="w_meditation" placeholder="10" min="1" max="120"><button class="btn btn-gold btn-sm" onclick="saveWellness('meditation')">Save</button>`,
+    flow: `<h3 style="font-size:0.95rem;margin-bottom:8px">🩸 Flow</h3><select class="inp" id="w_flow"><option value="spotting">Spotting</option><option value="light">Light</option><option value="moderate" selected>Moderate</option><option value="heavy">Heavy</option></select><button class="btn btn-gold btn-sm" onclick="saveWellness('flow')">Save</button>`
+  };
+  form.innerHTML = forms[type] || '';
+  form.style.display = 'block';
+  document.querySelectorAll('.wellness-item').forEach(el => el.classList.remove('active'));
+  event?.currentTarget?.classList.add('active');
+}
+
+async function saveWellness(type) {
+  const value = document.getElementById('w_' + type)?.value || '';
+  if (!value) return toast('Enter a value');
+  const data = _lsGet('luna_wellness') || {};
+  if (!data[type]) data[type] = [];
+  const entry = { value, date: new Date().toISOString(), phase: getPhase(getCycDay()), day: getCycDay() };
+  data[type].push(entry);
+  _lsSet('luna_wellness', data);
+  await _syncWellnessEntry(type, value);
+  S.xp += 5; _saveLocal();
+  toast('Logged! +5 XP ✦');
+  document.getElementById('wellnessForm').style.display = 'none';
+  doInitWellness();
+}
+
+function doInitWellness() {
+  document.getElementById('wellnessForm').style.display = 'none';
+  const data = _lsGet('luna_wellness') || {};
+  const today = new Date().toISOString().split('T')[0];
+  let summary = '';
+  const icons = { symptoms:'🤒', sleep:'😴', cravings:'🍫', skin:'✨', stress:'🧘', energy:'⚡', meditation:'🧎', flow:'🩸' };
+  Object.keys(data).forEach(key => {
+    const e = data[key].find(x => x.date?.startsWith(today));
+    if (e) summary += `<p style="font-size:0.82rem;color:var(--textSub);padding:5px 0;border-bottom:1px solid var(--border)">${icons[key] || '•'} <strong>${key}</strong>: ${e.value}</p>`;
+  });
+  const el = document.getElementById('wellnessSummary');
+  if (el) el.innerHTML = summary || '<div class="empty-state"><div class="empty-state-icon">📋</div><div class="empty-state-text">Nothing logged today yet</div></div>';
+}
+
+// ── MAIN REFRESH ───────────────────────────────────────────────
+function doRefresh() {
+  if (!S.user) return;
+  const day = getCycDay();
+  const ph = getPhase(day);
+  const eph = getEffectivePhase();
+  const pm = PHASE_META[eph] || PHASE_META[ph];
+
+  const hp = document.getElementById('homePill');
+  if (hp) { hp.className = 'pill ' + pm.pill; hp.textContent = pm.emoji + ' ' + pm.label; }
+
+  doUpdateRing(day, ph);
+  renderPredictions();
+
+  document.querySelectorAll('.phase-cell').forEach(c => c.classList.toggle('active', c.dataset.phase === ph));
+
+  const needsMap = {
+    menstrual:  { nut:'Iron-rich warm foods — masoor dal, ragi, dates', mov:'Restorative yoga, gentle walks', moon:'New Moon — rest & release', hyd:'Warm water, herbal teas' },
+    follicular: { nut:'Zinc + folate — sprouts, moong dal, flaxseeds', mov:'Strength training, try new activities', moon:'Waxing Moon — plant intentions', hyd:'8–10 glasses, coconut water' },
+    ovulation:  { nut:'Antioxidants — berries, seeds, cruciferous veg', mov:'HIIT, peak cardio, running', moon:'Full Moon — shine & connect', hyd:'Extra hydration for cervical mucus' },
+    luteal:     { nut:'Magnesium + B6 — bajra, banana, sweet potato', mov:'Pilates, gentle strength, yoga', moon:'Waning Moon — turn inward', hyd:'Reduce caffeine, increase water' },
+    pregnancy:  { nut:'Folate, iron, omega-3 — leafy greens, walnuts', mov:'Prenatal yoga, gentle walks', moon:'Nurturing energy', hyd:'10+ glasses, avoid herbal teas' },
+    fertility:  { nut:'Antioxidants + zinc — pomegranate, sunflower seeds', mov:'Moderate exercise, avoid overtraining', moon:'Growth energy', hyd:'8–10 glasses, warm fluids' }
+  };
+  const nd = needsMap[eph] || needsMap[ph];
+  const setEl = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  setEl('needNut', nd.nut); setEl('needMov', nd.mov); setEl('needMoon', nd.moon); setEl('needHyd', nd.hyd);
+
+  const bk = filterMeals('breakfast')[0];
+  setEl('bkPrev', bk ? `Try: ${bk.n} — ${bk.r}` : '');
+
+  const cl = S.user.cycle?.cycLen || 28;
+  setEl('csDaysLeft', Math.max(0, cl - day));
+  setEl('csCycLen', cl);
+  setEl('csPdLen', S.user.cycle?.pdLen || 5);
+  const updLp = document.getElementById('upd_lp'); if (updLp) updLp.value = S.user.cycle?.lastPd || '';
+  const updCl = document.getElementById('upd_cl'); if (updCl) updCl.value = cl;
+
+  const tog = document.getElementById('pcosToggle');
+  if (tog) { tog.classList.toggle('on', !!S.user.pcos); tog.setAttribute('aria-checked', !!S.user.pcos); }
+  const pcosBadge = document.getElementById('pcosMealBadge');
+  if (pcosBadge) pcosBadge.style.display = S.user.pcos ? 'block' : 'none';
+
+  document.getElementById('pregnancyModeBtn')?.classList.toggle('active', !!S.pregnancyMode);
+  document.getElementById('fertilityModeBtn')?.classList.toggle('active', !!S.fertilityMode);
+
+  setEl('setName', S.user.name || '—');
+  setEl('setEmail', S.user.email || '—');
+  setEl('setDiet', S.user.diet || '—');
+  setEl('setPcos', S.user.pcos ? 'Active 💜' : 'Inactive');
+
+  doInitHydration();
+  doUpdateChallengeUI();
+  doUpdateMedUI();
+  doLoadInsight(eph, day);
+}
+
+// ── RING SVG (FIXED ARC MATH) ──────────────────────────────────
+function doUpdateRing(day, ph) {
+  const setEl = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  setEl('ringDay', day);
+  setEl('ringPhase', (PHASE_META[ph]?.label || '').replace(/^.+\s/, '').toUpperCase());
+  setEl('ringDate', new Date().toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short' }));
+
+  const circ = 2 * Math.PI * 90;
+  const cl = S.user?.cycle?.cycLen || 28;
+  const pl = S.user?.cycle?.pdLen || 5;
+
+  const phases = [
+    { id:'arcM', start:0, end:pl },
+    { id:'arcF', start:pl, end:13 },
+    { id:'arcO', start:13, end:16 },
+    { id:'arcL', start:16, end:cl }
+  ];
+
+  phases.forEach(p => {
+    const el = document.getElementById(p.id);
+    if (!el) return;
+    const len = Math.max(0, p.end - p.start);
+    const dashLen = (len / cl) * circ;
+    const offsetDeg = (p.start / cl) * circ;
+    el.setAttribute('stroke-dasharray', `${dashLen} ${circ - dashLen}`);
+    el.setAttribute('stroke-dashoffset', circ - offsetDeg);
+  });
+
+  const ang = ((day / cl) * 360) * (Math.PI / 180);
+  const dotX = 110 + 90 * Math.sin(ang);
+  const dotY = 110 - 90 * Math.cos(ang);
+  ['curDot','curDotGlow'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.setAttribute('cx', dotX); el.setAttribute('cy', dotY); }
+  });
+}
+
+// ── GEMINI AI ──────────────────────────────────────────────────
+async function callGemini(prompt, maxTokens = 500) {
+  if (!window._geminiUrl) throw new Error('Gemini URL not set');
+  const res = await fetch(window._geminiUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.75, maxOutputTokens: maxTokens, candidateCount: 1 }
+    })
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    console.error('Gemini HTTP error:', res.status, errBody);
+    throw new Error('Gemini API error ' + res.status);
+  }
+  const data = await res.json();
+  if (data.error) { console.error('Gemini API error:', data.error); throw new Error(data.error.message); }
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  if (!text) throw new Error('Empty Gemini response');
+  return text;
+}
+
+async function callGeminiJSON(prompt, maxTokens = 400) {
+  const text = await callGemini(prompt, maxTokens);
+  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch(e) {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+    throw new Error('Could not parse Gemini JSON: ' + cleaned.slice(0, 100));
+  }
+}
+
+async function doLoadInsight(eph, day) {
+  const cacheKey = `luna_ins_${eph}_${new Date().toDateString()}`;
+  const cached = _lsGet(cacheKey);
+  const loading = document.getElementById('insightLoading');
+  const content = document.getElementById('insightContent');
+
+  const setInsight = (d) => {
+    const setEl = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    setEl('insTitle', d.title);
+    setEl('insBody', d.body);
+    setEl('insAffirm', `"${d.affirmation}"`);
+    if (loading) loading.style.display = 'none';
+    if (content) content.style.display = 'block';
+  };
+
+  if (cached) { setInsight(cached); return; }
+
+  if (loading) loading.style.display = 'flex';
+  if (content) content.style.display = 'none';
+
+  const fallbacks = {
+    menstrual:  { title:'🌑 Sacred Inner Winter', body:'Your body is releasing the old cycle. Oestrogen and progesterone are at their lowest — this is the time to rest, reflect, and honour your need for stillness.', affirmation:'My stillness holds infinite wisdom.' },
+    follicular: { title:'🌒 Inner Spring Awakens', body:'Oestrogen is rising, bringing renewed energy and mental clarity. This is the most anabolic phase — your muscles recover faster and creativity surges.', affirmation:'I bloom with every sunrise.' },
+    ovulation:  { title:'🌕 Peak Radiance', body:'You are at your hormonal peak. Testosterone surges alongside oestrogen — your confidence, energy, and magnetism are at their highest.', affirmation:'I radiate light from within.' },
+    luteal:     { title:'🌘 Inner Autumn', body:'Progesterone rises, drawing your energy inward. Your intuition sharpens. This is a sacred time to slow down and honour your sensitivity.', affirmation:'My sensitivity is my superpower.' },
+    pregnancy:  { title:'🤰 Nurturing Life', body:'Your body is doing extraordinary work. Focus on gentle movement, nourishing food, and deep rest. Every day is a gift.', affirmation:'I trust my body\'s wisdom completely.' },
+    fertility:  { title:'🌱 Fertile Ground', body:'Your body is preparing for possibility. Track your basal body temperature, cervical mucus, and cycle signs for peak awareness.', affirmation:'I am fertile ground for all I desire.' }
+  };
+
+  const name = S.user?.name || 'beautiful soul';
+  const prompt = `You are LUNARA AI, a warm, wise female wellness guide. Create a daily insight for ${name} who is in their ${eph} phase (Day ${day}). PCOS: ${S.user?.pcos ? 'Yes' : 'No'}. Pregnancy mode: ${S.pregnancyMode}. Fertility mode: ${S.fertilityMode}.
+
+Return ONLY valid JSON (no markdown, no extra text):
+{"title":"Poetic title max 10 words with phase moon emoji","body":"2-3 sentences connecting current hormones to practical daily life, warm and wise tone","affirmation":"One powerful present-tense affirmation, max 10 words"}`;
+
+  try {
+    const parsed = await callGeminiJSON(prompt, 350);
+    if (!parsed.title || !parsed.body || !parsed.affirmation) throw new Error('Invalid insight structure');
+    _lsSet(cacheKey, parsed);
+    setInsight(parsed);
+  } catch(e) {
+    console.warn('AI insight fallback, using local:', e.message);
+    setInsight(fallbacks[eph] || fallbacks.follicular);
+  }
+}
+
+// ── AI JOURNAL ANALYSIS ────────────────────────────────────────
+async function analyseJournalEntry(entry) {
+  const prompt = `You are LUNARA AI, a warm empathetic wellness guide. Analyse this journal entry from someone in their ${entry.ph} phase (Day ${entry.day} of their cycle): "${entry.text.substring(0, 300)}"
+
+Return ONLY valid JSON, no markdown, no extra text:
+{"analysis":"1-2 sentence empathetic observation connecting their emotional state to their current cycle phase","suggestion":"One gentle practical suggestion for today based on their phase and feelings"}`;
+  try {
+    const parsed = await callGeminiJSON(prompt, 250);
+    if (!parsed.analysis) throw new Error('Invalid');
+    return parsed;
+  } catch(e) { console.warn('Journal analysis failed:', e.message); return null; }
+}
+
+// ── MEALS DATA ─────────────────────────────────────────────────
+const MDB = {
+  breakfast: [
+    {n:"Ragi Mudde with Flaxseed Chutney",d:["veg","vegan","pcos"],gi:42,r:"Highest calcium grain",t:["iron","mag","pcos"]},
+    {n:"Moong Dal Chilla",d:["veg","vegan","pcos"],gi:32,r:"High protein and folate",t:["protein","pcos"]},
+    {n:"Bajra Upma",d:["veg","vegan","pcos"],gi:52,r:"Magnesium-rich millet",t:["mag","pcos"]},
+    {n:"Besan Chilla with Raita",d:["veg","vegan","pcos"],gi:35,r:"Low GI, high protein",t:["protein","low-gi","pcos"]},
+    {n:"Masala Omelette",d:["egg","non-veg"],gi:0,r:"Iron + choline boost",t:["iron","protein"]},
+    {n:"Paneer Bhurji",d:["veg"],gi:15,r:"Protein supports oestrogen metabolism",t:["protein"]},
+    {n:"Sprouts Salad",d:["veg","vegan","pcos"],gi:22,r:"Tripled folate in sprouting",t:["low-gi","pcos","protein"]},
+    {n:"Quinoa Porridge",d:["veg","vegan","pcos"],gi:38,r:"Complete amino acids",t:["low-gi","mag","pcos"]},
+    {n:"Idli with Sambar",d:["veg","vegan"],gi:60,r:"Fermented probiotic goodness",t:[]},
+    {n:"Methi Thepla",d:["veg"],gi:50,r:"Fenugreek balances blood sugar",t:["iron","pcos"]},
+    {n:"Ragi Malt",d:["veg","vegan","pcos"],gi:45,r:"Calcium + iron powerhouse",t:["iron","mag","pcos"]},
+    {n:"Oats with Seeds",d:["veg","vegan","pcos"],gi:40,r:"Beta-glucan stabilises blood sugar",t:["low-gi","mag","pcos"]},
+    {n:"Poha with Peanuts",d:["veg","vegan"],gi:58,r:"Iron absorption with vitamin C",t:["iron"]},
+    {n:"Sattu Paratha",d:["veg"],gi:48,r:"Sattu protein powerhouse",t:["iron","protein"]},
+    {n:"Pesarattu",d:["veg","vegan","pcos"],gi:35,r:"Green gram complete protein",t:["protein","pcos"]}
+  ],
+  lunch: [
+    {n:"Palak Paneer with Jowar Roti",d:["veg"],gi:42,r:"Spinach iron + paneer calcium",t:["iron","protein","mag"]},
+    {n:"Rajma Chawal",d:["veg","vegan","pcos"],gi:48,r:"Iron and folate complete meal",t:["iron","mag","pcos"]},
+    {n:"Masoor Dal with Brown Rice",d:["veg","vegan","pcos"],gi:28,r:"Lowest GI lentil",t:["iron","low-gi","pcos"]},
+    {n:"Chana Masala with Quinoa",d:["veg","vegan","pcos"],gi:35,r:"Zinc-rich chickpeas",t:["iron","pcos","protein"]},
+    {n:"Chicken Curry with Rice",d:["non-veg"],gi:50,r:"Complete protein for recovery",t:["protein"]},
+    {n:"Sambar Rice",d:["veg","vegan","pcos"],gi:50,r:"Moringa zinc + tamarind",t:["mag","pcos"]},
+    {n:"Fish Curry with Rice",d:["non-veg"],gi:52,r:"Omega-3 anti-inflammatory",t:["protein"]},
+    {n:"Baingan Bharta with Roti",d:["veg","vegan","pcos"],gi:42,r:"Fibre + magnesium",t:["mag","pcos"]},
+    {n:"Dal Makhani with Naan",d:["veg"],gi:60,r:"Black lentils — highest iron",t:["iron"]},
+    {n:"Bisi Bele Bath",d:["veg","vegan"],gi:50,r:"Complete Karnataka meal",t:["mag"]},
+    {n:"Chole with Baked Bhature",d:["veg","vegan"],gi:55,r:"High protein chickpeas",t:["protein","iron"]}
+  ],
+  dinner: [
+    {n:"Moong Dal Khichdi",d:["veg","vegan","pcos"],gi:42,r:"Easiest to digest",t:["iron","pcos"]},
+    {n:"Grilled Fish with Vegetables",d:["non-veg","pcos"],gi:25,r:"Omega-3 reduces cramping",t:["protein","low-gi","pcos"]},
+    {n:"Vegetable Soup with Millet Bread",d:["veg","vegan","pcos"],gi:38,r:"Warm and restorative",t:["mag","pcos"]},
+    {n:"Egg Curry with Roti",d:["egg"],gi:48,r:"Tryptophan supports sleep",t:["protein"]},
+    {n:"Tandoori Chicken Salad",d:["non-veg","pcos"],gi:25,r:"High protein, low carb",t:["protein","low-gi","pcos"]},
+    {n:"Dal Roti with Kachumber",d:["veg","vegan","pcos"],gi:45,r:"Classic balanced meal",t:["iron","pcos"]},
+    {n:"Palak Soup with Toast",d:["veg","vegan"],gi:40,r:"Iron + vitamin C synergy",t:["iron","mag"]},
+    {n:"Paneer Tikka",d:["veg","pcos"],gi:35,r:"High protein, low carb",t:["protein","low-gi","pcos"]}
+  ],
+  snacks: [
+    {n:"Roasted Makhana",d:["veg","vegan","pcos"],gi:35,r:"Magnesium + anti-inflammatory",t:["mag","pcos","low-gi"]},
+    {n:"Mixed Nuts & Seeds",d:["veg","vegan","pcos"],gi:25,r:"Omega-3 and zinc powerhouse",t:["mag","low-gi","pcos"]},
+    {n:"Dark Chocolate 85%",d:["veg","vegan"],gi:45,r:"Magnesium for PMS relief",t:["iron","mag"]},
+    {n:"Roasted Chana",d:["veg","vegan","pcos"],gi:40,r:"High fibre + protein",t:["protein","pcos","low-gi"]},
+    {n:"Boiled Egg",d:["egg","pcos"],gi:0,r:"Selenium for egg quality",t:["protein","pcos","low-gi"]},
+    {n:"Dhokla",d:["veg","vegan"],gi:42,r:"Fermented protein snack",t:["protein"]},
+    {n:"Sundal",d:["veg","vegan","pcos"],gi:35,r:"South Indian protein snack",t:["protein","pcos"]}
+  ],
+  drinks: [
+    {n:"Ashwagandha Latte",d:["veg","vegan","pcos"],gi:35,r:"Adaptogen reduces cortisol",t:["pcos"]},
+    {n:"Jeera Ginger Water",d:["veg","vegan","pcos"],gi:20,r:"Reduces bloating + cramps",t:["pcos","low-gi"]},
+    {n:"Hibiscus Rose Cooler",d:["veg","vegan"],gi:25,r:"Natural cycle support",t:["low-gi"]},
+    {n:"Saffron Warm Milk",d:["veg"],gi:35,r:"Serotonin boost",t:[]},
+    {n:"Turmeric Golden Milk",d:["veg"],gi:35,r:"Anti-inflammatory curcumin",t:["pcos"]},
+    {n:"Coconut Water",d:["veg","vegan","pcos"],gi:30,r:"Natural electrolytes",t:["low-gi","pcos"]}
+  ]
+};
+
+const SPECIAL_MEALS = {
+  pregnancy: {
+    breakfast: [{n:"Methi + Palak Paratha",r:"Folate-rich for neural development",t:["iron","protein"]},{n:"Banana Oats Porridge",r:"Potassium + slow release energy",t:["mag"]}],
+    lunch: [{n:"Palak Dal + Brown Rice",r:"Iron + folate powerhouse",t:["iron","protein"]}],
+    dinner: [{n:"Vegetable Khichdi",r:"Easy to digest, complete protein",t:["protein"]}],
+    snacks: [{n:"Walnuts + Dates",r:"Omega-3 + iron for baby",t:["iron","mag"]}],
+    drinks: [{n:"Warm Milk with Saffron",r:"Calcium for bone development",t:[]}]
+  },
+  fertility: {
+    breakfast: [{n:"Pumpkin Seed Oats",r:"Zinc for egg quality",t:["low-gi","pcos"]},{n:"Pomegranate Bowl",r:"Antioxidants for egg health",t:["low-gi"]}],
+    lunch: [{n:"Chicken + Quinoa Bowl",r:"Protein + folate for fertility",t:["protein"]}],
+    dinner: [{n:"Salmon + Vegetables",r:"Omega-3 supports follicular development",t:["protein","low-gi"]}],
+    snacks: [{n:"Brazil Nuts",r:"Selenium for reproductive health",t:["low-gi"]}],
+    drinks: [{n:"Pomegranate Juice (diluted)",r:"Antioxidants support uterine lining",t:[]}]
+  }
+};
+
+function filterMeals(cat) {
+  let list = MDB[cat] || [];
+  const eph = getEffectivePhase();
+  if (SPECIAL_MEALS[eph]?.[cat]) list = [...SPECIAL_MEALS[eph][cat], ...list];
+  const d = S.user?.diet || 'vegetarian';
+  return list.filter(m => {
+    if (d === 'non-vegetarian') return true;
+    if (d === 'eggetarian') return m.d?.some(x => ['veg','vegan','egg'].includes(x));
+    if (d === 'vegetarian') return m.d?.some(x => ['veg','vegan'].includes(x));
+    return m.d?.includes('vegan');
+  }).filter(m => !S.user?.pcos || m.gi < 56 || m.t?.includes('pcos'));
+}
+
+function doRenderMeals() {
+  const ph = getPhase(getCycDay());
+  const eph = getEffectivePhase();
+  const cats = [
+    { key:'breakfast', label:'🌅 Breakfast', emoji:'🌅' },
+    { key:'lunch',     label:'☀️ Lunch',     emoji:'☀️' },
+    { key:'dinner',    label:'🌙 Dinner',    emoji:'🌙' },
+    { key:'snacks',    label:'🥜 Snacks',    emoji:'🥜' },
+    { key:'drinks',    label:'🥤 Drinks',    emoji:'🥤' }
+  ];
+  const avoidMap = {
+    menstrual:  ['Cold drinks & ice cream','Excess caffeine','Fried foods','Refined sugar','Alcohol'],
+    follicular: ['Heavy fried meals','Excess dairy','Alcohol','Processed snacks'],
+    ovulation:  ['Excess sugar','Trans fats','Too much caffeine','Salty processed food'],
+    luteal:     ['Excess salt','Caffeine after noon','Alcohol','High-sugar foods'],
+    pregnancy:  ['Raw fish/meat','Unpasteurised dairy','Excess caffeine','Alcohol — completely'],
+    fertility:  ['Trans fats','Excess alcohol','Processed meat','High-mercury fish']
+  };
+  let html = '';
+  cats.forEach(c => {
+    const meals = filterMeals(c.key).slice(0, 3);
+    if (!meals.length) return;
+    html += `<div class="meal-section-title">${c.label}</div>`;
+    meals.forEach(m => {
+      const tags = (m.t || []).map(t => {
+        const tagMap = { iron:`<span class="tag tag-iron">Iron</span>`, protein:`<span class="tag tag-protein">Protein</span>`, pcos:`<span class="tag tag-pcos">PCOS</span>`, 'low-gi':`<span class="tag tag-low-gi">Low GI</span>`, mag:`<span class="tag tag-mag">Magnesium</span>` };
+        return tagMap[t] || '';
+      }).join('');
+      html += `<div class="meal-item"><div class="meal-emoji-box">${c.emoji}</div><div class="meal-body"><div class="meal-name">${m.n}</div><div class="meal-why">${m.r}</div><div class="tags-row">${tags}</div></div></div>`;
+    });
+  });
+  const wrap = document.getElementById('mealsWrap');
+  if (wrap) wrap.innerHTML = html || '<div class="empty-state"><div class="empty-state-icon">🍽️</div><div class="empty-state-text">No meals match your current filters</div></div>';
+  const avoids = avoidMap[eph] || avoidMap[ph] || [];
+  const avoidEl = document.getElementById('avoidList');
+  if (avoidEl) avoidEl.innerHTML = avoids.map(a => `<li>${a}</li>`).join('');
+}
+
+// ── FITNESS DATA ───────────────────────────────────────────────
+const FITNESS_DB = {
+  menstrual: {
+    wisdom:'Inner winter. Restorative movement honours your body\'s sacred need for rest.',
+    energyPct:28, energyLabel:'Very Low',
+    workouts: [
+      {name:'Restorative Yoga',type:'Yoga',dur:25,desc:"Child's pose, forward folds, supported butterfly. Let gravity do the work."},
+      {name:'Gentle Walk',type:'Walk',dur:20,desc:'Slow, mindful walking. No pace goals. Feel the ground beneath your feet.'},
+      {name:'Yoga Nidra',type:'Rest',dur:30,desc:'Guided deep relaxation. Releases tension and supports hormonal reset.'}
+    ],
+    avoid:['HIIT','Heavy weights','Long runs','Intense core work'],
+    recovery:'Heat therapy. Epsom salt bath. 8–9h sleep. Castor oil pack on abdomen.'
+  },
+  follicular: {
+    wisdom:'Oestrogen rising — muscles recover 30% faster. Your strongest phase begins.',
+    energyPct:74, energyLabel:'High',
+    workouts: [
+      {name:'Full Body Strength',type:'Strength',dur:50,desc:'Compound movements: squats, deadlifts, rows. Challenge your limits.'},
+      {name:'HIIT Sprints',type:'HIIT',dur:30,desc:'8 rounds: 30s all-out, 30s rest. Best cardiovascular adaptation phase.'},
+      {name:'Dance Cardio',type:'Cardio',dur:45,desc:'High-energy dance class. Dopamine + oestrogen = pure joy movement.'}
+    ],
+    avoid:['Complete rest days (you won\'t need them)'],
+    recovery:'Protein 1.6–1.8g/kg body weight. Cold shower post-workout.'
+  },
+  ovulation: {
+    wisdom:'Testosterone peaks alongside oestrogen. This is your peak performance window.',
+    energyPct:92, energyLabel:'Peak',
+    workouts: [
+      {name:'Peak HIIT',type:'HIIT',dur:35,desc:'Tabata protocol: 20s work, 10s rest. Test your absolute limits today.'},
+      {name:'Personal Best Weights',type:'Strength',dur:60,desc:'Attempt 1-rep maxes. Your coordination and power are at their highest.'},
+      {name:'Trail Run',type:'Cardio',dur:40,desc:'Challenging outdoor pace. Your spatial awareness peaks during ovulation.'}
+    ],
+    avoid:['Skipping warm-up (injury risk increases around ovulation)'],
+    recovery:'Extra protein. Antioxidant-rich foods. Electrolyte hydration.'
+  },
+  luteal: {
+    wisdom:'Progesterone draws your energy inward. Work with it, not against it.',
+    energyPct:46, energyLabel:'Moderate',
+    workouts: [
+      {name:'Pilates Core',type:'Pilates',dur:40,desc:'Controlled breath-based movement. Reduces PMS symptoms significantly.'},
+      {name:'Swimming',type:'Swimming',dur:35,desc:'Water reduces joint pressure. Warmth eases luteal discomfort.'},
+      {name:'Light Strength',type:'Strength',dur:35,desc:'60–70% of usual weights. Focus on form, not load.'}
+    ],
+    avoid:['HIIT in final 4 days','Heavy max attempts','Skipping rest'],
+    recovery:'8–9h sleep. Epsom salt baths. Magnesium supplement.'
+  },
+  pregnancy: {
+    wisdom:'Your body is doing extraordinary work. Gentle movement supports both of you.',
+    energyPct:40, energyLabel:'Variable',
+    workouts: [
+      {name:'Prenatal Yoga',type:'Yoga',dur:30,desc:'Modified poses. Focus on hip opening and breathing techniques.'},
+      {name:'Gentle Walk',type:'Walk',dur:20,desc:'15–20 mins daily. Reduces back pain and improves mood.'},
+      {name:'Pelvic Floor Exercises',type:'Strength',dur:15,desc:'Kegel exercises. Essential preparation for labour and recovery.'}
+    ],
+    avoid:['Lying flat on back after 1st trimester','High-impact jumping','Heavy weights','Hot yoga'],
+    recovery:'Rest when tired. Listen to your body above all else.'
+  },
+  fertility: {
+    wisdom:'Balanced moderate exercise supports healthy hormone levels and egg quality.',
+    energyPct:60, energyLabel:'Moderate',
+    workouts: [
+      {name:'Moderate Strength',type:'Strength',dur:40,desc:'Avoid overtraining. 70–75% intensity is ideal for fertility.'},
+      {name:'Yoga Flow',type:'Yoga',dur:35,desc:'Hip-opening sequences increase blood flow to reproductive organs.'},
+      {name:'Walking',type:'Walk',dur:30,desc:'Stress reduction is as important as physical fitness for fertility.'}
+    ],
+    avoid:['Overtraining (raises cortisol)','Extreme endurance sport','Very hot environments'],
+    recovery:'Prioritise sleep. Reduce stress. Acupuncture can complement exercise.'
+  }
+};
+
+function doRenderFitness() {
+  const eph = getEffectivePhase();
+  const fd = FITNESS_DB[eph] || FITNESS_DB[getPhase(getCycDay())];
+  const ph = getPhase(getCycDay());
+  const pm = PHASE_META[eph] || PHASE_META[ph];
+  if (!fd) return;
+
+  const wisdom = document.getElementById('fitnessWisdom');
+  if (wisdom) wisdom.innerHTML = `<div class="wisdom-title">${pm.emoji} ${pm.label}</div><div class="wisdom-text">${fd.wisdom}</div>`;
+
+  const setEl = (id, val) => { const el = document.getElementById(id); if (el) el[typeof val === 'string' && (el.tagName === 'INPUT' || el.tagName === 'SELECT') ? 'value' : 'textContent'] = val; };
+  const ebEl = document.getElementById('energyBar'); if (ebEl) ebEl.style.width = fd.energyPct + '%';
+  setEl('energyPct', fd.energyPct + '%');
+  setEl('energyLabel', fd.energyLabel);
+
+  const wrap = document.getElementById('workoutsWrap');
+  if (wrap) {
+    wrap.innerHTML = fd.workouts.map(w => `
+      <div class="workout-card">
+        <div class="workout-header">
+          <div><div class="workout-name">${w.name}</div><div class="workout-meta">${w.dur} min</div></div>
+          <span class="pill ${pm.pill}">${w.type}</span>
+        </div>
+        <div class="workout-desc">${w.desc}</div>
+      </div>`).join('');
+  }
+
+  const avoidEl = document.getElementById('avoidExList');
+  if (avoidEl) avoidEl.innerHTML = fd.avoid.map(a => `<li>${a}</li>`).join('');
+
+  const logWk = document.getElementById('log_wk');
+  if (logWk) logWk.innerHTML = '<option value="">Select workout</option>' + fd.workouts.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
+}
+
+// ── JOURNAL ────────────────────────────────────────────────────
+let selMood = null;
+const MOOD_PROMPTS = {
+  menstrual:  ['What does your body need most today?','What are you ready to release?','What wisdom does this stillness hold?'],
+  follicular: ['What new idea is stirring within you?','What would you begin if you had no fear?','What seeds are you planting?'],
+  ovulation:  ['Where do you feel most powerfully alive?','What conversation has been waiting to happen?','Who do you want to connect with?'],
+  luteal:     ['What boundary would serve you right now?','What are you grateful for in this cycle?','What does your body want to tell you?']
+};
+
+function pickMood(s, name) {
+  selMood = { s, name };
+  document.querySelectorAll('.mood-btn').forEach((b, i) => b.classList.toggle('sel', i === s - 1));
+  const el = document.getElementById('moodLabel'); if (el) el.textContent = name;
+}
+
+async function doSaveJournal() {
+  if (!selMood) return toast('Choose your mood first 🌙');
+  const txt = document.getElementById('jText')?.value?.trim() || '';
+  if (txt.length < 10) return toast('Write a little more...');
+
+  const ph = getPhase(getCycDay());
+  const entry = { id: Date.now(), date: new Date().toISOString().split('T')[0], mood: selMood, text: txt, ph, day: getCycDay(), aiAnalysis: null };
+
+  const jrnl = _lsGet('luna_journal') || [];
+  jrnl.unshift(entry);
+  _lsSet('luna_journal', jrnl);
+
+  document.getElementById('jText').value = '';
+  document.querySelectorAll('.mood-btn').forEach(b => b.classList.remove('sel'));
+  const ml = document.getElementById('moodLabel'); if (ml) ml.textContent = '';
+  selMood = null;
+
+  S.xp += 5; _saveLocal();
+  doRenderJournalList();
+  toast('Entry saved ✦ AI is reflecting...');
+
+  const analysis = await analyseJournalEntry(entry);
+  if (analysis) {
+    jrnl[0].aiAnalysis = analysis;
+    _lsSet('luna_journal', jrnl);
+    doRenderJournalList();
+    toast('✦ AI insight ready');
+  }
+  await _syncJournalEntry({ ...entry, aiAnalysis: analysis });
+}
+
+function doRenderJournalList() {
+  const ph = getPhase(getCycDay());
+  const prompts = MOOD_PROMPTS[ph] || MOOD_PROMPTS.menstrual;
+  const jpEl = document.getElementById('jPrompt');
+  if (jpEl) jpEl.textContent = prompts[new Date().getDate() % prompts.length];
+
+  const jrnl = _lsGet('luna_journal') || [];
+  const el = document.getElementById('journalEntries');
+  if (!el) return;
+  if (!jrnl.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📓</div><div class="empty-state-text">No entries yet. Begin your journey ✦</div></div>';
+    return;
+  }
+  const moodIcons = ['', '🌊', '⚡', '💜', '🌙', '⛈️'];
+  el.innerHTML = jrnl.slice(0, 10).map(e => `
+    <div class="journal-entry">
+      <div class="entry-header">
+        <span class="entry-meta">${e.date} · ${e.ph} · Day ${e.day}</span>
+        <span style="font-size:1.2rem">${moodIcons[e.mood?.s] || '🌙'}</span>
+      </div>
+      <div class="entry-text">${e.text.length > 180 ? e.text.slice(0, 180) + '…' : e.text}</div>
+      ${e.aiAnalysis ? `<div class="ai-analysis">✦ <strong>AI reflection:</strong> ${e.aiAnalysis.analysis}<br><em>${e.aiAnalysis.suggestion}</em></div>` : ''}
+    </div>`).join('');
+}
+
+// ── ANALYTICS ──────────────────────────────────────────────────
+function doRenderAnalytics() {
+  const jrnl = _lsGet('luna_journal') || [];
+  const wks = _lsGet('luna_workouts') || [];
+  const wdata = _lsGet('luna_wellness') || {};
+
+  const avgMood = jrnl.length ? (jrnl.reduce((s,e) => s + (e.mood?.s || 0), 0) / jrnl.length).toFixed(1) : 0;
+  const statsEl = document.getElementById('statsGrid');
+  if (statsEl) statsEl.innerHTML = [
+    { val: S.streak || 0, lbl: '🔥 Streak' },
+    { val: jrnl.length, lbl: '📓 Journal' },
+    { val: wks.length, lbl: '💪 Workouts' },
+    { val: avgMood, lbl: '😊 Avg Mood' }
+  ].map(s => `<div class="stat-box"><div class="stat-val">${s.val}</div><div class="stat-lbl">${s.lbl}</div></div>`).join('');
+
+  doMLInsight(jrnl, wks, wdata);
+  doSymptomCorrelation(wdata, jrnl);
+
+  setTimeout(() => {
+    if (typeof Chart === 'undefined') return;
+    doMoodChart(jrnl);
+    doEnergyChart(wks);
+  }, 100);
+}
+
+function doMLInsight(jrnl, wks, wdata) {
+  const insights = [];
+  if (jrnl.length >= 5) {
+    const stormyCount = jrnl.filter(e => e.ph === 'luteal' && e.mood?.s === 5).length;
+    if (stormyCount >= 2) insights.push('📊 <strong>Pattern detected:</strong> Stormy moods correlate with your luteal phase. Magnesium supplementation may help.');
+    const highMoodFoll = jrnl.filter(e => e.ph === 'follicular' && e.mood?.s <= 2).length;
+    if (highMoodFoll >= 3) insights.push('🌊 <strong>Trend:</strong> Your follicular phase shows high positive moods — lean into creative work and social connections during this time.');
+  }
+  if (wks.length >= 5) {
+    const avgGain = wks.filter(w => w.engA > w.engB).length / wks.length;
+    if (avgGain > 0.6) insights.push('⚡ <strong>Workout boost:</strong> Exercise consistently improves your energy by ' + Math.round(avgGain * 100) + '%. Keep it up!');
+  }
+  if (!insights.length) insights.push('Track for 5+ days to unlock personal pattern detection. Your data tells your unique cycle story.');
+  const el = document.getElementById('mlInsightText');
+  if (el) el.innerHTML = insights.map(i => `<p style="font-size:0.83rem;color:var(--textSub);line-height:1.6;margin-bottom:6px">${i}</p>`).join('');
+}
+
+function doSymptomCorrelation(wdata, jrnl) {
+  const card = document.getElementById('correlationCard');
+  const dataEl = document.getElementById('correlationData');
+  if (!card || !dataEl) return;
+
+  const phases = ['menstrual','follicular','ovulation','luteal'];
+  const stressData = {};
+  phases.forEach(p => stressData[p] = []);
+
+  if (wdata.stress?.length >= 4) {
+    wdata.stress.forEach(e => { if (stressData[e.phase]) stressData[e.phase].push(parseInt(e.value)); });
+    const avgs = phases.map(p => stressData[p].length ? Math.round(stressData[p].reduce((a,b)=>a+b,0)/stressData[p].length*10) : 0);
+    if (avgs.some(v => v > 0)) {
+      card.style.display = 'block';
+      const colors = ['#c084fc','#38bdf8','#fbbf24','#fb7185'];
+      dataEl.innerHTML = '<p style="font-size:0.76rem;color:var(--textMuted);margin-bottom:10px">Average stress by phase</p>' +
+        phases.map((p, i) => `<div class="correlation-bar"><div class="corr-label">${p}</div><div class="corr-track"><div class="corr-fill" style="width:${avgs[i]}%;background:${colors[i]}"></div></div><span style="font-size:0.72rem;color:var(--textSub);margin-left:6px">${Math.round(avgs[i]/10*10)/10}/10</span></div>`).join('');
+    }
+  }
+}
+
+function doMoodChart(jrnl) {
+  const canvas = document.getElementById('chartMood');
+  if (!canvas) return;
+  if (_charts.mood) { _charts.mood.destroy(); _charts.mood = null; }
+  const phases = ['menstrual','follicular','ovulation','luteal'];
+  const data = phases.map(ph => {
+    const entries = jrnl.filter(e => e.ph === ph);
+    return entries.length ? +(entries.reduce((s,e)=>s+(e.mood?.s||0),0)/entries.length).toFixed(1) : 0;
+  });
+  _charts.mood = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['Menstrual','Follicular','Ovulation','Luteal'],
+      datasets: [{ data, backgroundColor: ['rgba(192,132,252,0.7)','rgba(56,189,248,0.7)','rgba(251,191,36,0.7)','rgba(251,113,133,0.7)'], borderRadius: 8, borderSkipped: false }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, max: 5, ticks: { color: 'rgba(136,152,204,0.7)', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        x: { ticks: { color: 'rgba(136,152,204,0.7)', font: { size: 11 } }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+function doEnergyChart(wks) {
+  const canvas = document.getElementById('chartEnergy');
+  if (!canvas) return;
+  if (_charts.energy) { _charts.energy.destroy(); _charts.energy = null; }
+  const data = wks.slice(-12);
+  if (!data.length) return;
+  _charts.energy = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: data.map((_,i) => `W${i+1}`),
+      datasets: [
+        { label:'Before', data:data.map(w=>w.engB), borderColor:'rgba(120,160,255,0.5)', tension:0.4, fill:false, pointRadius:3 },
+        { label:'After',  data:data.map(w=>w.engA), borderColor:'rgba(232,197,106,0.9)', backgroundColor:'rgba(232,197,106,0.06)', tension:0.4, fill:true, pointRadius:3 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color:'rgba(136,152,204,0.8)', font:{ size:11 } } } },
+      scales: {
+        y: { beginAtZero:true, max:10, ticks:{ color:'rgba(136,152,204,0.7)', font:{size:11} }, grid:{color:'rgba(255,255,255,0.04)'} },
+        x: { ticks:{ color:'rgba(136,152,204,0.7)', font:{size:11} }, grid:{display:false} }
+      }
+    }
+  });
+}
+
+async function doGenReport() {
+  const repEl = document.getElementById('patternReport');
+  const btn = document.getElementById('aiReportBtn');
+  if (!repEl) return;
+
+  repEl.innerHTML = '<div class="ai-loading" style="padding:16px 0"><span>✦</span>&nbsp;Gemini AI is analysing your data <div class="ai-dots"><span></span><span></span><span></span></div></div>';
+  if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+
+  const ph = getPhase(getCycDay());
+  const jrnl = _lsGet('luna_journal') || [];
+  const wks  = _lsGet('luna_workouts') || [];
+  const wdata = _lsGet('luna_wellness') || {};
+  const avgMood = jrnl.length ? (jrnl.reduce((s,e) => s + (e.mood?.s||0), 0) / jrnl.length).toFixed(1) : 'N/A';
+  const avgEng  = wks.length  ? (wks.reduce((s,w) => s + (w.engA||5), 0) / wks.length).toFixed(1) : 'N/A';
+  const recentSymptoms = (wdata.symptoms||[]).slice(-5).map(e=>e.value).filter(Boolean).join(', ') || 'none recorded';
+
+  const prompt = `You are LUNARA AI, a warm and empowering women's wellness coach. Write a personalised wellness report for ${S.user?.name || 'this user'}.
+
+User profile:
+- Current phase: ${ph} (Day ${getCycDay()} of a ${S.user?.cycle?.cycLen||28}-day cycle)
+- PCOS: ${S.user?.pcos ? 'Yes' : 'No'}
+- Diet: ${S.user?.diet || 'vegetarian'}
+- Journal entries tracked: ${jrnl.length}
+- Average mood score: ${avgMood}/5
+- Workouts logged: ${wks.length}
+- Average post-workout energy: ${avgEng}/10
+- Recent symptoms noted: ${recentSymptoms}
+- Current streak: ${S.streak||0} days
+
+Write exactly 3 HTML sections using this structure (no markdown, valid HTML only):
+<div class="ai-report-box">
+<div class="report-section"><div class="report-section-title">🌙 Phase Wisdom</div><p>[2-3 sentences about what is happening hormonally in the ${ph} phase and how it affects energy, mood, and body. Use <strong> for key terms.]</p></div>
+<div class="report-section"><div class="report-section-title">📊 Your Patterns</div><p>[Analyse their actual tracked data. Mention specific numbers. Note positive trends and any patterns worth awareness. Be encouraging. Use <strong> for numbers.]</p></div>
+<div class="report-section"><div class="report-section-title">✦ This Week's Action Plan</div><p>[Give 4 specific, actionable recommendations tailored to their phase, PCOS status, and diet. One sentence each, separated by line breaks. Use <strong> for action words.]</p></div>
+</div>
+
+Important: Return ONLY the HTML. No extra text, no markdown fences.`;
+
+  try {
+    const html = await callGemini(prompt, 700);
+    const cleaned = html.replace(/^```(?:html)?/i, '').replace(/```$/i, '').trim();
+    if (cleaned.includes('<div') || cleaned.includes('<p')) {
+      repEl.innerHTML = cleaned;
+    } else {
+      repEl.innerHTML = '<div class="ai-report-box"><div class="report-section"><p>' +
+        cleaned.split('\n').filter(l=>l.trim()).join('</p><p>') + '</p></div></div>';
+    }
+  } catch(e) {
+    console.warn('Report generation failed:', e.message);
+    const phaseWisdom = {
+      menstrual: 'You are in your <strong>menstrual phase</strong> — your body is shedding and renewing. Oestrogen and progesterone are at their lowest, which naturally draws energy inward. This is not weakness; this is sacred restoration.',
+      follicular: 'You are entering your <strong>follicular phase</strong> — oestrogen is beginning to rise, bringing renewed clarity, motivation, and creative energy. Your muscles recover up to 30% faster right now, making this an ideal time to begin new habits.',
+      ovulation: 'You are in your <strong>ovulation phase</strong> — your hormonal peak. Oestrogen and testosterone are surging together, giving you maximum energy, confidence, and magnetism. This is your biological superpower window.',
+      luteal: 'You are in your <strong>luteal phase</strong> — progesterone is rising, drawing your awareness inward. Your intuition is sharpened, your sensitivity heightened. This phase calls for nourishment, not pushing.'
+    };
+    const phaseAction = {
+      menstrual: '<strong>Rest actively</strong> — restorative yoga, warm baths, and 8-9 hours sleep. <strong>Eat iron-rich foods</strong> like masoor dal, ragi, and leafy greens to replenish. <strong>Reduce caffeine</strong> and opt for ginger or turmeric tea instead. <strong>Honour your pace</strong> — any output is a gift right now.',
+      follicular: '<strong>Start something new</strong> — this is your best phase for beginning habits, projects, or workouts. <strong>Lift weights or do HIIT</strong> — your body adapts fastest now. <strong>Eat zinc and folate</strong> from sprouts, moong dal, and flaxseeds. <strong>Schedule important meetings</strong> — your communication is sharp.',
+      ovulation: '<strong>Attempt personal bests</strong> in the gym or work — your peak is now. <strong>Have important conversations</strong> — you are at your most magnetic and persuasive. <strong>Eat antioxidants</strong> — berries, seeds, and cruciferous vegetables support peak hormonal function. <strong>Stay hydrated</strong> — extra water supports cervical health.',
+      luteal: '<strong>Reduce workout intensity</strong> to 60-70% and favour pilates or swimming. <strong>Eat magnesium-rich foods</strong> — bajra, banana, and dark chocolate to ease PMS. <strong>Set boundaries</strong> — your energy is precious and your sensitivity is information. <strong>Prioritise sleep</strong> of 8-9 hours and consider an Epsom salt bath.'
+    };
+    repEl.innerHTML = `<div class="ai-report-box">
+      <div class="report-section"><div class="report-section-title">🌙 Phase Wisdom</div><p>${phaseWisdom[ph] || phaseWisdom.follicular}</p></div>
+      <div class="report-section"><div class="report-section-title">📊 Your Patterns</div><p>You have logged <strong>${jrnl.length} journal entries</strong> with an average mood of <strong>${avgMood}/5</strong>. Your workout count stands at <strong>${wks.length}</strong> sessions, with an average post-workout energy score of <strong>${avgEng}/10</strong>. ${wks.length > 3 ? 'Your consistency is building real momentum.' : 'Start logging workouts to unlock energy pattern insights.'} ${jrnl.length >= 5 ? 'Your journaling habit is giving you self-awareness that most people never develop.' : 'Log 5+ journal entries to unlock mood pattern analysis.'}</p></div>
+      <div class="report-section"><div class="report-section-title">✦ This Week\'s Action Plan</div><p>${phaseAction[ph] || phaseAction.follicular}</p></div>
+    </div>`;
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Generate AI Report'; }
+}
+
+// ── SHOP ───────────────────────────────────────────────────────
+const SHOP_PRODUCTS = [
+  {
+    id:1, name:'Sanitary Pads (Regular)',
+    price:200, desc:'Soft cottony-feel surface, quick-dry layer, leakproof for normal flow days. Pack of 20.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\sanitary pads.jpeg',
+    emoji:'🩸', categories:['pads']
+  },
+  {
+    id:2, name:'Sanitary Pads (Overnight / XL)',
+    price:300, desc:'Extra-long 40cm with wide wings. Full-night protection for heavy flow. Pack of 12.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\overnight or xl pads.jpeg',
+    emoji:'🌙', categories:['pads']
+  },
+  {
+    id:3, name:'Panty Liners',
+    price:200, desc:'Ultra-thin, breathable liners for daily freshness and light spotting days. Pack of 30.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\panty liners.jpeg',
+    emoji:'🌸', categories:['pads']
+  },
+  {
+    id:4, name:'Tampons (Regular & Super)',
+    price:200, desc:'100% organic cotton, applicator and non-applicator options. Freedom of movement. Pack of 16.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\tampons.jpeg',
+    emoji:'💧', categories:['pads']
+  },
+  {
+    id:5, name:'Menstrual Cup (Soft Silicone)',
+    price:450, desc:'Medical-grade silicone, reusable for up to 10 years. Holds 3× more than a pad. Sizes S & M.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\menstural cup.jpeg',
+    emoji:'🌿', categories:['eco']
+  },
+  {
+    id:6, name:'Menstrual Disc',
+    price:400, desc:'Sits at the vaginal fornix for zero-leak protection. Can be worn during intimacy. Reusable.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\menstural disc.jpeg',
+    emoji:'⭕', categories:['eco']
+  },
+  {
+    id:7, name:'Period Underwear (2-Pack)',
+    price:1000, desc:'Holds up to 4 tampons worth of flow. Machine washable, odour-resistant. Sizes XS–3XL.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\period undies .jpeg',
+    emoji:'👙', categories:['eco']
+  },
+  {
+    id:8, name:'Reusable Cloth Pads (6-Pack)',
+    price:900, desc:'Organic cotton with waterproof backing. Soft on skin, eco-friendly, washable. Regular + overnight.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\cotton pads.jpeg',
+    emoji:'🌱', categories:['eco']
+  },
+  {
+    id:9, name:'Portable Heating Pad (USB)',
+    price:700, desc:'USB rechargeable, 3 heat levels, flexible design wraps around abdomen or lower back. 8-hour battery.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\heating pad.jpeg',
+    emoji:'🔥', categories:['pain']
+  },
+  {
+    id:10, name:'Hot Water Bag (Premium)',
+    price:600, desc:'Classic 2L rubber hot water bottle with a plush velvet cover. Deep, penetrating heat for cramps.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\heating water bag.jpeg',
+    emoji:'♨️', categories:['pain']
+  },
+  {
+    id:11, name:'Period Pain Relief Patches (12-Pack)',
+    price:400, desc:'Herbal heat patches infused with clove, ginger & menthol. Stick-on, discreet, 8-hour targeted relief.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\period pain relief patches.jpeg',
+    emoji:'💊', categories:['pain']
+  },
+  {
+    id:12, name:'Herbal Tea for Period Comfort',
+    price:500, desc:'Organic blend of ginger, chamomile, raspberry leaf & cramp bark. Reduces cramps & bloating. 20 bags.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\hearbal tea.jpeg',
+    emoji:'🍵', categories:['pain']
+  },
+  {
+    id:13, name:'Intimate Hygiene Wash',
+    price:350, desc:'pH-balanced, fragrance-free gentle wash for the intimate area. Gynecologist tested. 200ml.',
+    img: '/assets/images/hygiene wash.jpeg',
+    emoji:'🫧', categories:['hygiene']
+  },
+  {
+    id:14, name:'Intimate Hygiene Wipes (20-Pack)',
+    price:200, desc:'Individually wrapped biodegradable wipes. Alcohol-free, aloe vera formula. Gentle and refreshing.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\hygiene wipes.jpeg',
+    emoji:'✨', categories:['hygiene']
+  },
+  {
+    id:15, name:'Emergency Period Care Kit',
+    price:1299, desc:'On-the-go kit: 4 pads (2 regular, 2 overnight), 2 liners, 1 pain patch, 5 wipes, 5 disposal bags.',
+    img:'C:\\lunara weeb\\public\\assets\\images\\emergency kit.jpeg',
+    emoji:'🎒', categories:['hygiene','pads']
+  }
+]
+
+let _shopFilter = 'all';
+function filterShop(cat, btn) {
+  _shopFilter = cat;
+  document.querySelectorAll('.shop-filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  _shopRendered = false;
+  doRenderShop();
+}
+
+function doRenderShop() {
+  const grid = document.getElementById('shopGrid');
+  if (!grid) return;
+  const filtered = _shopFilter === 'all' ? SHOP_PRODUCTS : SHOP_PRODUCTS.filter(p => p.categories.includes(_shopFilter));
+  if (!filtered.length) {
+    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">🛍️</div><div class="empty-state-text">No products in this category</div></div>';
+    return;
+  }
+  grid.innerHTML = filtered.map(p => `
+    <div class="prod-card">
+      <div class="prod-img-wrap">
+        <img src="${p.img}" alt="${p.name}" loading="lazy"
+          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div style="display:none;font-size:3.5rem;align-items:center;justify-content:center;width:100%;height:100%;background:var(--card2)">${p.emoji||'🌸'}</div>
+        <div class="prod-badge">₹${p.price}</div>
+      </div>
+      <div class="prod-info">
+        <div class="prod-name">${p.name}</div>
+        <div class="prod-desc">${p.desc}</div>
+        <div class="prod-price">₹${p.price}</div>
+        <button class="btn btn-gold btn-sm btn-block" onclick="addToCart(${p.id})">Add to Cart 🛒</button>
+      </div>
+    </div>`).join('');
+  doUpdateCartUI();
+}
+
+function addToCart(id) {
+  const p = SHOP_PRODUCTS.find(x => x.id === id);
+  if (!p) return;
+  S.cart = S.cart || [];
+  S.cart.push({ ...p });
+  _saveLocal(); doUpdateCartUI(); toast(`${p.name} added 🛒`);
+}
+
+function doUpdateCartUI() {
+  const c = (S.cart || []).length;
+  const total = (S.cart || []).reduce((s, p) => s + p.price, 0);
+  const badge = document.getElementById('cartBadge');
+  if (badge) { badge.textContent = c; badge.classList.toggle('on', c > 0); }
+  const cs = document.getElementById('cartSummary');
+  if (cs) {
+    cs.style.display = c > 0 ? 'block' : 'none';
+    if (c > 0) {
+      const cc = document.getElementById('cartCount'); if (cc) cc.textContent = c;
+      const ct = document.getElementById('cartTotal'); if (ct) ct.textContent = '₹' + total.toLocaleString('en-IN');
+    }
+  }
+}
+
+function openCheckout() {
+  if (!(S.cart || []).length) return toast('Cart is empty');
+  const items = document.getElementById('checkoutItems');
+  const total = document.getElementById('checkoutTotal');
+  if (items) items.innerHTML = S.cart.map(p => `<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:0.82rem;border-bottom:1px solid var(--border)"><span>${p.name}</span><span style="color:var(--gold)">₹${p.price}</span></div>`).join('');
+  if (total) total.textContent = 'Total: ₹' + S.cart.reduce((s,p)=>s+p.price,0).toLocaleString('en-IN');
+  document.getElementById('checkoutModal')?.classList.add('on');
+}
+
+function doPlaceOrder() {
+  const name = document.getElementById('co_name')?.value?.trim();
+  const addr = document.getElementById('co_addr')?.value?.trim();
+  const phone = document.getElementById('co_phone')?.value?.trim();
+  if (!name || !addr || !phone) return toast('Fill all delivery details');
+  const orders = _lsGet('luna_orders') || [];
+  orders.push({ id:'LUN-'+Date.now(), items:[...S.cart], total:S.cart.reduce((s,p)=>s+p.price,0), name, addr, phone, date:new Date().toISOString() });
+  _lsSet('luna_orders', orders);
+  S.cart = []; _saveLocal(); doUpdateCartUI();
+  closeModal('checkoutModal');
+  ['co_name','co_addr','co_phone'].forEach(id => { const el = document.getElementById(id); if (el) el.value=''; });
+  toast('Order placed! 🎉 Estimated delivery 3–5 business days');
+}
+
+// ── CYCLE UPDATE ───────────────────────────────────────────────
+function doCycleUpdate() {
+  const dt = document.getElementById('upd_lp')?.value;
+  const cl = parseInt(document.getElementById('upd_cl')?.value || 28);
+  if (!dt) return toast('Select a date');
+  if (S.user) { S.user.cycle.lastPd = dt; S.user.cycle.cycLen = cl; }
+  _saveLocal();
+  _syncToFirestore('cycle', { lastPd: dt, cycLen: cl, pdLen: S.user?.cycle?.pdLen || 5 });
+  doRefresh();
+  _shopRendered = false;
+  toast('Cycle updated ✨');
+}
+
+function doPCOSToggle() {
+  if (S.user) S.user.pcos = !S.user.pcos;
+  _saveLocal();
+  _syncToFirestore('pcos', S.user?.pcos);
+  const tog = document.getElementById('pcosToggle');
+  if (tog) { tog.classList.toggle('on', !!S.user?.pcos); tog.setAttribute('aria-checked', String(!!S.user?.pcos)); }
+  const badge = document.getElementById('pcosMealBadge');
+  if (badge) badge.style.display = S.user?.pcos ? 'block' : 'none';
+  toast(S.user?.pcos ? 'PCOS protocol activated 💜' : 'PCOS protocol deactivated');
+}
+
+function doLogWorkout() {
+  const type = document.getElementById('log_wk')?.value;
+  const dur = parseInt(document.getElementById('log_dur')?.value || 0);
+  const engB = parseInt(document.getElementById('log_engB')?.value || 5);
+  const engA = parseInt(document.getElementById('log_engA')?.value || 5);
+  if (!type || !dur) return toast('Fill all fields');
+  const wks = _lsGet('luna_workouts') || [];
+  wks.push({ nm: type, dur, engB, engA, ph: getPhase(getCycDay()), day: getCycDay(), ts: new Date().toISOString() });
+  _lsSet('luna_workouts', wks);
+  S.xp += 15; _saveLocal();
+  ['log_dur','log_engB','log_engA'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  toast('Workout logged! +15 XP 💪');
+}
+
+// ── DATA EXPORT ────────────────────────────────────────────────
+function exportData() {
+  const data = {
+    user: { name: S.user?.name, email: S.user?.email, cycle: S.user?.cycle, diet: S.user?.diet, pcos: S.user?.pcos },
+    journal: _lsGet('luna_journal') || [],
+    workouts: _lsGet('luna_workouts') || [],
+    wellness: _lsGet('luna_wellness') || [],
+    orders: _lsGet('luna_orders') || [],
+    medications: S.medications || [],
+    exportedAt: new Date().toISOString(),
+    lunaraVersion: '3.0'
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `lunara-data-${new Date().toISOString().split('T')[0]}.json`;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  toast('Data exported 📥');
+}
+
+// ── UTILS ──────────────────────────────────────────────────────
+let _toastTimer;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('on'), 3000);
+}
+function closeModal(id) { document.getElementById(id)?.classList.remove('on'); }
+
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('on'); });
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.on').forEach(m => m.classList.remove('on'));
+});
+
+// ── OFFLINE ────────────────────────────────────────────────────
+window.addEventListener('offline', () => document.getElementById('offBar')?.classList.add('show'));
+window.addEventListener('online', () => { document.getElementById('offBar')?.classList.remove('show'); toast('Back online 📡 Syncing...'); });
+if (!navigator.onLine) document.getElementById('offBar')?.classList.add('show');
+
+// ── 3D MOON BACKGROUND ─────────────────────────────────────────
+(function initMoon3D() {
+  const canvas = document.getElementById('moonCanvas');
+  if (!canvas) return;
+
+  function loadThreeJS() {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+    script.onload = () => {
+      try {
+        const W = window.innerWidth, H = window.innerHeight;
+        const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'low-power' });
+        renderer.setSize(W, H);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.outputEncoding = THREE.sRGBEncoding;
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 100);
+        camera.position.set(0, 0, 5);
+
+        const geo = new THREE.SphereGeometry(1.2, 96, 96);
+        const mat = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(0xf5d98a),
+          roughness: 0.78,
+          metalness: 0.02,
+          emissive: new THREE.Color(0xe8c56a),
+          emissiveIntensity: 0.12
+        });
+        const moon = new THREE.Mesh(geo, mat);
+        moon.position.set(2.2, 0.9, -2);
+        scene.add(moon);
+
+        const craterGeo = new THREE.SphereGeometry(1.21, 32, 32);
+        const craterMat = new THREE.MeshStandardMaterial({ color: 0xd4b060, transparent: true, opacity: 0.0, wireframe: false });
+        scene.add(new THREE.Mesh(craterGeo, craterMat));
+
+        const glowGeo = new THREE.SphereGeometry(1.5, 32, 32);
+        const glowMat = new THREE.MeshBasicMaterial({
+          color: new THREE.Color(0xe8c56a),
+          transparent: true,
+          opacity: 0.04,
+          side: THREE.BackSide
+        });
+        const glow = new THREE.Mesh(glowGeo, glowMat);
+        glow.position.copy(moon.position);
+        scene.add(glow);
+
+        const starCount = 600;
+        const starPositions = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount * 3; i++) starPositions[i] = (Math.random() - 0.5) * 60;
+        const starGeo = new THREE.BufferGeometry();
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.06, transparent: true, opacity: 0.7 });
+        scene.add(new THREE.Points(starGeo, starMat));
+
+        const nebCount = 200;
+        const nebPositions = new Float32Array(nebCount * 3);
+        for (let i = 0; i < nebCount * 3; i++) nebPositions[i] = (Math.random() - 0.5) * 20;
+        const nebGeo = new THREE.BufferGeometry();
+        nebGeo.setAttribute('position', new THREE.BufferAttribute(nebPositions, 3));
+        const nebMat = new THREE.PointsMaterial({ color: 0x4a7aff, size: 0.12, transparent: true, opacity: 0.15 });
+        scene.add(new THREE.Points(nebGeo, nebMat));
+
+        const ambientLight = new THREE.AmbientLight(0x0d1b4a, 0.7);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xfff8e0, 1.6);
+        dirLight.position.set(-4, 5, 6);
+        scene.add(dirLight);
+        const rimLight = new THREE.PointLight(0x4466ff, 0.4, 20);
+        rimLight.position.set(4, -2, -4);
+        scene.add(rimLight);
+
+        let time = 0;
+        let mouseX = 0, mouseY = 0;
+        document.addEventListener('mousemove', e => {
+          mouseX = (e.clientX / window.innerWidth - 0.5) * 0.3;
+          mouseY = (e.clientY / window.innerHeight - 0.5) * 0.2;
+        });
+
+        function animate() {
+          requestAnimationFrame(animate);
+          time += 0.006;
+          moon.rotation.y += 0.0008;
+          moon.rotation.x += 0.0003;
+          moon.position.y = 0.9 + Math.sin(time * 0.5) * 0.12;
+          glow.position.copy(moon.position);
+          camera.position.x += (mouseX - camera.position.x) * 0.02;
+          camera.position.y += (-mouseY - camera.position.y) * 0.02;
+          camera.lookAt(scene.position);
+          glowMat.opacity = 0.04 + Math.sin(time) * 0.02;
+          mat.emissiveIntensity = 0.12 + Math.sin(time * 0.8) * 0.04;
+          renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+          const nW = window.innerWidth, nH = window.innerHeight;
+          camera.aspect = nW / nH;
+          camera.updateProjectionMatrix();
+          renderer.setSize(nW, nH);
+        });
+      } catch(e) { console.warn('3D init error:', e); fallbackCanvas(canvas); }
+    };
+    script.onerror = () => fallbackCanvas(canvas);
+    document.head.appendChild(script);
+  }
+
+  function fallbackCanvas(cvs) {
+    cvs.style.display = 'none';
+    const div = document.createElement('div');
+    div.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;background:radial-gradient(ellipse at 75% 30%, rgba(232,197,106,0.08) 0%, transparent 60%)';
+    document.body.insertBefore(div, document.body.firstChild);
+  }
+
+  loadThreeJS();
+})();
+
+// ── FINAL INIT ─────────────────────────────────────────────────
+const today = new Date().toISOString().split('T')[0];
+const lastPdInput = document.getElementById('i_lastPd');
+if (lastPdInput && !lastPdInput.value) lastPdInput.value = today;
+
+if (S.user) {
+  document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+      document.getElementById('appWrap')?.classList.add('show');
+      document.getElementById('onbWrap')?.classList.remove('show');
+      _appInit();
+    }, 200);
+  });
+}
+</script>
+</body>
+</html>
