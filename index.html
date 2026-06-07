@@ -1178,6 +1178,7 @@ function _loadLocal() {
   try {
     const d = JSON.parse(localStorage.getItem('luna_v4') || '{}');
     if (d && typeof d === 'object') {
+      // Only merge non-null user if we don't have a live auth user
       Object.assign(S, d);
     }
   } catch(e) {}
@@ -1445,6 +1446,7 @@ function getPhase(day) {
   return 'luteal';
 }
 
+// Pregnancy/fertility phase overrides
 function getEffectivePhase() {
   if (S.pregnancyMode) return 'pregnancy';
   if (S.fertilityMode) return 'fertility';
@@ -1504,6 +1506,7 @@ function doUpdateHydrationUI() {
   const wc = document.getElementById('waterCount'); if (wc) wc.textContent = S.water;
   const wcm = document.getElementById('waterCountMeals'); if (wcm) wcm.textContent = S.water;
   const wp = document.getElementById('waterPct'); if (wp) wp.textContent = pct + '%';
+  // Update cup visuals
   document.querySelectorAll('.water-cup').forEach((cup, i) => {
     cup.classList.toggle('filled', i < S.water);
   });
@@ -1664,14 +1667,18 @@ function doRefresh() {
   const eph = getEffectivePhase();
   const pm = PHASE_META[eph] || PHASE_META[ph];
 
+  // Pill
   const hp = document.getElementById('homePill');
   if (hp) { hp.className = 'pill ' + pm.pill; hp.textContent = pm.emoji + ' ' + pm.label; }
 
+  // Ring
   doUpdateRing(day, ph);
   renderPredictions();
 
+  // Phase grid
   document.querySelectorAll('.phase-cell').forEach(c => c.classList.toggle('active', c.dataset.phase === ph));
 
+  // Body needs
   const needsMap = {
     menstrual:  { nut:'Iron-rich warm foods — masoor dal, ragi, dates', mov:'Restorative yoga, gentle walks', moon:'New Moon — rest & release', hyd:'Warm water, herbal teas' },
     follicular: { nut:'Zinc + folate — sprouts, moong dal, flaxseeds', mov:'Strength training, try new activities', moon:'Waxing Moon — plant intentions', hyd:'8–10 glasses, coconut water' },
@@ -1684,9 +1691,11 @@ function doRefresh() {
   const setEl = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
   setEl('needNut', nd.nut); setEl('needMov', nd.mov); setEl('needMoon', nd.moon); setEl('needHyd', nd.hyd);
 
+  // Breakfast preview
   const bk = filterMeals('breakfast')[0];
   setEl('bkPrev', bk ? `Try: ${bk.n} — ${bk.r}` : '');
 
+  // Cycle screen
   const cl = S.user.cycle?.cycLen || 28;
   setEl('csDaysLeft', Math.max(0, cl - day));
   setEl('csCycLen', cl);
@@ -1694,14 +1703,17 @@ function doRefresh() {
   const updLp = document.getElementById('upd_lp'); if (updLp) updLp.value = S.user.cycle?.lastPd || '';
   const updCl = document.getElementById('upd_cl'); if (updCl) updCl.value = cl;
 
+  // PCOS toggle
   const tog = document.getElementById('pcosToggle');
   if (tog) { tog.classList.toggle('on', !!S.user.pcos); tog.setAttribute('aria-checked', !!S.user.pcos); }
   const pcosBadge = document.getElementById('pcosMealBadge');
   if (pcosBadge) pcosBadge.style.display = S.user.pcos ? 'block' : 'none';
 
+  // Mode toggles
   document.getElementById('pregnancyModeBtn')?.classList.toggle('active', !!S.pregnancyMode);
   document.getElementById('fertilityModeBtn')?.classList.toggle('active', !!S.fertilityMode);
 
+  // Settings
   setEl('setName', S.user.name || '—');
   setEl('setEmail', S.user.email || '—');
   setEl('setDiet', S.user.diet || '—');
@@ -1720,10 +1732,11 @@ function doUpdateRing(day, ph) {
   setEl('ringPhase', (PHASE_META[ph]?.label || '').replace(/^.+\s/, '').toUpperCase());
   setEl('ringDate', new Date().toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short' }));
 
-  const circ = 2 * Math.PI * 90;
+  const circ = 2 * Math.PI * 90; // = 565.48...
   const cl = S.user?.cycle?.cycLen || 28;
   const pl = S.user?.cycle?.pdLen || 5;
 
+  // Phase segments: [start_day, end_day, arc_element_id]
   const phases = [
     { id:'arcM', start:0, end:pl },
     { id:'arcF', start:pl, end:13 },
@@ -1738,10 +1751,13 @@ function doUpdateRing(day, ph) {
     const dashLen = (len / cl) * circ;
     const offsetDeg = (p.start / cl) * circ;
     el.setAttribute('stroke-dasharray', `${dashLen} ${circ - dashLen}`);
+    // Correct offset: SVG starts at top (already rotated -90deg), 
+    // we subtract arc start from total circumference to shift it correctly
     el.setAttribute('stroke-dashoffset', circ - offsetDeg);
   });
 
-  const ang = ((day / cl) * 360) * (Math.PI / 180);
+  // Current day dot
+  const ang = ((day / cl) * 360) * (Math.PI / 180); // starts at top due to -90deg SVG rotation
   const dotX = 110 + 90 * Math.sin(ang);
   const dotY = 110 - 90 * Math.cos(ang);
   ['curDot','curDotGlow'].forEach(id => {
@@ -1773,12 +1789,15 @@ async function callGemini(prompt, maxTokens = 500) {
   return text;
 }
 
+// Helper: call Gemini and parse JSON response
 async function callGeminiJSON(prompt, maxTokens = 400) {
   const text = await callGemini(prompt, maxTokens);
+  // Strip markdown fences if present
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
   try {
     return JSON.parse(cleaned);
   } catch(e) {
+    // Try to extract JSON object from response
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (match) return JSON.parse(match[0]);
     throw new Error('Could not parse Gemini JSON: ' + cleaned.slice(0, 100));
@@ -1905,6 +1924,7 @@ const MDB = {
   ]
 };
 
+// Pregnancy/fertility specific meals
 const SPECIAL_MEALS = {
   pregnancy: {
     breakfast: [{n:"Methi + Palak Paratha",r:"Folate-rich for neural development",t:["iron","protein"]},{n:"Banana Oats Porridge",r:"Potassium + slow release energy",t:["mag"]}],
@@ -2113,6 +2133,7 @@ async function doSaveJournal() {
   doRenderJournalList();
   toast('Entry saved ✦ AI is reflecting...');
 
+  // Async AI analysis + Firestore sync
   const analysis = await analyseJournalEntry(entry);
   if (analysis) {
     jrnl[0].aiAnalysis = analysis;
@@ -2154,6 +2175,7 @@ function doRenderAnalytics() {
   const wks = _lsGet('luna_workouts') || [];
   const wdata = _lsGet('luna_wellness') || {};
 
+  // Stats grid
   const avgMood = jrnl.length ? (jrnl.reduce((s,e) => s + (e.mood?.s || 0), 0) / jrnl.length).toFixed(1) : 0;
   const statsEl = document.getElementById('statsGrid');
   if (statsEl) statsEl.innerHTML = [
@@ -2163,9 +2185,13 @@ function doRenderAnalytics() {
     { val: avgMood, lbl: '😊 Avg Mood' }
   ].map(s => `<div class="stat-box"><div class="stat-val">${s.val}</div><div class="stat-lbl">${s.lbl}</div></div>`).join('');
 
+  // ML insights
   doMLInsight(jrnl, wks, wdata);
+
+  // Symptom correlation
   doSymptomCorrelation(wdata, jrnl);
 
+  // Charts
   setTimeout(() => {
     if (typeof Chart === 'undefined') return;
     doMoodChart(jrnl);
@@ -2307,11 +2333,13 @@ Important: Return ONLY the HTML. No extra text, no markdown fences.`;
     if (cleaned.includes('<div') || cleaned.includes('<p')) {
       repEl.innerHTML = cleaned;
     } else {
+      // Gemini returned plain text — wrap it
       repEl.innerHTML = '<div class="ai-report-box"><div class="report-section"><p>' +
         cleaned.split('\n').filter(l=>l.trim()).join('</p><p>') + '</p></div></div>';
     }
   } catch(e) {
     console.warn('Report generation failed:', e.message);
+    // Rich fallback report
     const phaseWisdom = {
       menstrual: 'You are in your <strong>menstrual phase</strong> — your body is shedding and renewing. Oestrogen and progesterone are at their lowest, which naturally draws energy inward. This is not weakness; this is sacred restoration.',
       follicular: 'You are entering your <strong>follicular phase</strong> — oestrogen is beginning to rise, bringing renewed clarity, motivation, and creative energy. Your muscles recover up to 30% faster right now, making this an ideal time to begin new habits.',
@@ -2337,97 +2365,141 @@ Important: Return ONLY the HTML. No extra text, no markdown fences.`;
 // ── SHOP ───────────────────────────────────────────────────────
 const SHOP_PRODUCTS = [
   {
-    id:1, name:'Sanitary Pads (Regular)',
-    price:200, desc:'Soft cottony-feel surface, quick-dry layer, leakproof for normal flow days. Pack of 20.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\sanitary pads.jpeg',
-    emoji:'🩸', categories:['pads']
+    id: 1,
+    name: 'Sanitary Pads (Regular)',
+    price: 200,
+    desc: 'Soft cottony-feel surface, quick-dry layer, leakproof for normal flow days. Pack of 20.',
+    img: 'assets/images/sanitary pads.jpeg',
+    emoji: '🩸',
+    categories: ['pads']
   },
   {
-    id:2, name:'Sanitary Pads (Overnight / XL)',
-    price:300, desc:'Extra-long 40cm with wide wings. Full-night protection for heavy flow. Pack of 12.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\overnight or xl pads.jpeg',
-    emoji:'🌙', categories:['pads']
+    id: 2,
+    name: 'Sanitary Pads (Overnight / XL)',
+    price: 300,
+    desc: 'Extra-long 40cm with wide wings. Full-night protection for heavy flow. Pack of 12.',
+    img: 'assets/images/overnight or xl pads.jpeg',
+    emoji: '🌙',
+    categories: ['pads']
   },
   {
-    id:3, name:'Panty Liners',
-    price:200, desc:'Ultra-thin, breathable liners for daily freshness and light spotting days. Pack of 30.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\panty liners.jpeg',
-    emoji:'🌸', categories:['pads']
+    id: 3,
+    name: 'Panty Liners',
+    price: 200,
+    desc: 'Ultra-thin, breathable liners for daily freshness and light spotting days. Pack of 30.',
+    img: 'assets/images/panty liners.jpeg',
+    emoji: '🌸',
+    categories: ['pads']
   },
   {
-    id:4, name:'Tampons (Regular & Super)',
-    price:200, desc:'100% organic cotton, applicator and non-applicator options. Freedom of movement. Pack of 16.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\tampons.jpeg',
-    emoji:'💧', categories:['pads']
+    id: 4,
+    name: 'Tampons (Regular & Super)',
+    price: 200,
+    desc: '100% organic cotton, applicator and non-applicator options. Freedom of movement. Pack of 16.',
+    img: 'assets/images/tampons.jpeg',
+    emoji: '💧',
+    categories: ['pads']
   },
   {
-    id:5, name:'Menstrual Cup (Soft Silicone)',
-    price:450, desc:'Medical-grade silicone, reusable for up to 10 years. Holds 3× more than a pad. Sizes S & M.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\menstural cup.jpeg',
-    emoji:'🌿', categories:['eco']
+    id: 5,
+    name: 'Menstrual Cup (Soft Silicone)',
+    price: 450,
+    desc: 'Medical-grade silicone, reusable for up to 10 years. Holds 3× more than a pad. Sizes S & M.',
+    img: 'assets/images/menstural cup.jpeg',
+    emoji: '🌿',
+    categories: ['eco']
   },
   {
-    id:6, name:'Menstrual Disc',
-    price:400, desc:'Sits at the vaginal fornix for zero-leak protection. Can be worn during intimacy. Reusable.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\menstural disc.jpeg',
-    emoji:'⭕', categories:['eco']
+    id: 6,
+    name: 'Menstrual Disc',
+    price: 400,
+    desc: 'Sits at the vaginal fornix for zero-leak protection. Can be worn during intimacy. Reusable.',
+    img: 'assets/images/menstural disc.jpeg',
+    emoji: '⭕',
+    categories: ['eco']
   },
   {
-    id:7, name:'Period Underwear (2-Pack)',
-    price:1000, desc:'Holds up to 4 tampons worth of flow. Machine washable, odour-resistant. Sizes XS–3XL.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\period undies .jpeg',
-    emoji:'👙', categories:['eco']
+    id: 7,
+    name: 'Period Underwear (2-Pack)',
+    price: 1000,
+    desc: 'Holds up to 4 tampons worth of flow. Machine washable, odour-resistant. Sizes XS–3XL.',
+    img: 'assets/images/period undies .jpeg',
+    emoji: '👙',
+    categories: ['eco']
   },
   {
-    id:8, name:'Reusable Cloth Pads (6-Pack)',
-    price:900, desc:'Organic cotton with waterproof backing. Soft on skin, eco-friendly, washable. Regular + overnight.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\cotton pads.jpeg',
-    emoji:'🌱', categories:['eco']
+    id: 8,
+    name: 'Reusable Cloth Pads (6-Pack)',
+    price: 900,
+    desc: 'Organic cotton with waterproof backing. Soft on skin, eco-friendly, washable. Regular + overnight.',
+    img: 'assets/images/cotton pads.jpeg',
+    emoji: '🌱',
+    categories: ['eco']
   },
   {
-    id:9, name:'Portable Heating Pad (USB)',
-    price:700, desc:'USB rechargeable, 3 heat levels, flexible design wraps around abdomen or lower back. 8-hour battery.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\heating pad.jpeg',
-    emoji:'🔥', categories:['pain']
+    id: 9,
+    name: 'Portable Heating Pad (USB)',
+    price: 700,
+    desc: 'USB rechargeable, 3 heat levels, flexible design wraps around abdomen or lower back. 8-hour battery.',
+    img: 'assets/images/heating pad.jpeg',
+    emoji: '🔥',
+    categories: ['pain']
   },
   {
-    id:10, name:'Hot Water Bag (Premium)',
-    price:600, desc:'Classic 2L rubber hot water bottle with a plush velvet cover. Deep, penetrating heat for cramps.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\heating water bag.jpeg',
-    emoji:'♨️', categories:['pain']
+    id: 10,
+    name: 'Hot Water Bag (Premium)',
+    price: 600,
+    desc: 'Classic 2L rubber hot water bottle with a plush velvet cover. Deep, penetrating heat for cramps.',
+    img: 'assets/images/heating water bag.jpeg',
+    emoji: '♨️',
+    categories: ['pain']
   },
   {
-    id:11, name:'Period Pain Relief Patches (12-Pack)',
-    price:400, desc:'Herbal heat patches infused with clove, ginger & menthol. Stick-on, discreet, 8-hour targeted relief.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\period pain relief patches.jpeg',
-    emoji:'💊', categories:['pain']
+    id: 11,
+    name: 'Period Pain Relief Patches (12-Pack)',
+    price: 400,
+    desc: 'Herbal heat patches infused with clove, ginger & menthol. Stick-on, discreet, 8-hour targeted relief.',
+    img: 'assets/images/period pain relief patches.jpeg',
+    emoji: '💊',
+    categories: ['pain']
   },
   {
-    id:12, name:'Herbal Tea for Period Comfort',
-    price:500, desc:'Organic blend of ginger, chamomile, raspberry leaf & cramp bark. Reduces cramps & bloating. 20 bags.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\hearbal tea.jpeg',
-    emoji:'🍵', categories:['pain']
+    id: 12,
+    name: 'Herbal Tea for Period Comfort',
+    price: 500,
+    desc: 'Organic blend of ginger, chamomile, raspberry leaf & cramp bark. Reduces cramps & bloating. 20 bags.',
+    img: 'assets/images/hearbal tea.jpeg',
+    emoji: '🍵',
+    categories: ['pain']
   },
   {
-    id:13, name:'Intimate Hygiene Wash',
-    price:350, desc:'pH-balanced, fragrance-free gentle wash for the intimate area. Gynecologist tested. 200ml.',
-    img: '/assets/images/hygiene wash.jpeg',
-    emoji:'🫧', categories:['hygiene']
+    id: 13,
+    name: 'Intimate Hygiene Wash',
+    price: 350,
+    desc: 'pH-balanced, fragrance-free gentle wash for the intimate area. Gynecologist tested. 200ml.',
+    img: 'assets/images/hygiene wash.jpeg',
+    emoji: '🫧',
+    categories: ['hygiene']
   },
   {
-    id:14, name:'Intimate Hygiene Wipes (20-Pack)',
-    price:200, desc:'Individually wrapped biodegradable wipes. Alcohol-free, aloe vera formula. Gentle and refreshing.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\hygiene wipes.jpeg',
-    emoji:'✨', categories:['hygiene']
+    id: 14,
+    name: 'Intimate Hygiene Wipes (20-Pack)',
+    price: 200,
+    desc: 'Individually wrapped biodegradable wipes. Alcohol-free, aloe vera formula. Gentle and refreshing.',
+    img: 'assets/images/hygiene wipes.jpeg',
+    emoji: '✨',
+    categories: ['hygiene']
   },
   {
-    id:15, name:'Emergency Period Care Kit',
-    price:1299, desc:'On-the-go kit: 4 pads (2 regular, 2 overnight), 2 liners, 1 pain patch, 5 wipes, 5 disposal bags.',
-    img:'C:\\lunara weeb\\public\\assets\\images\\emergency kit.jpeg',
-    emoji:'🎒', categories:['hygiene','pads']
+    id: 15,
+    name: 'Emergency Period Care Kit',
+    price: 1299,
+    desc: 'On-the-go kit: 4 pads (2 regular, 2 overnight), 2 liners, 1 pain patch, 5 wipes, 5 disposal bags.',
+    img: 'assets/images/emergency kit.jpeg',
+    emoji: '🎒',
+    categories: ['hygiene', 'pads']
   }
 ]
-
 let _shopFilter = 'all';
 function filterShop(cat, btn) {
   _shopFilter = cat;
@@ -2448,9 +2520,14 @@ function doRenderShop() {
   grid.innerHTML = filtered.map(p => `
     <div class="prod-card">
       <div class="prod-img-wrap">
-        <img src="${p.img}" alt="${p.name}" loading="lazy"
-          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-        <div style="display:none;font-size:3.5rem;align-items:center;justify-content:center;width:100%;height:100%;background:var(--card2)">${p.emoji||'🌸'}</div>
+        <img src="${p.img}"
+             alt="${p.name}"
+             loading="lazy"
+             onerror="this.onerror=null;this.style.display='none';this.parentElement.querySelector('.img-fallback').style.display='flex';">
+        <div class="img-fallback" style="display:none;font-size:3.5rem;align-items:center;justify-content:center;width:100%;height:100%;background:var(--card2);flex-direction:column;gap:8px">
+          <span>${p.emoji || '🌸'}</span>
+          <span style="font-size:0.65rem;color:var(--textMuted);text-align:center;padding:0 8px">${p.name}</span>
+        </div>
         <div class="prod-badge">₹${p.price}</div>
       </div>
       <div class="prod-info">
@@ -2518,7 +2595,7 @@ function doCycleUpdate() {
   _saveLocal();
   _syncToFirestore('cycle', { lastPd: dt, cycLen: cl, pdLen: S.user?.cycle?.pdLen || 5 });
   doRefresh();
-  _shopRendered = false;
+  _shopRendered = false; // Reset so shop re-renders if phase changed
   toast('Cycle updated ✨');
 }
 
@@ -2579,10 +2656,12 @@ function toast(msg) {
 }
 function closeModal(id) { document.getElementById(id)?.classList.remove('on'); }
 
+// Close modal on overlay click
 document.querySelectorAll('.modal-overlay').forEach(overlay => {
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('on'); });
 });
 
+// Keyboard nav support
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.on').forEach(m => m.classList.remove('on'));
 });
@@ -2592,7 +2671,7 @@ window.addEventListener('offline', () => document.getElementById('offBar')?.clas
 window.addEventListener('online', () => { document.getElementById('offBar')?.classList.remove('show'); toast('Back online 📡 Syncing...'); });
 if (!navigator.onLine) document.getElementById('offBar')?.classList.add('show');
 
-// ── 3D MOON BACKGROUND ─────────────────────────────────────────
+// ── 3D MOON BACKGROUND (WebGL with Three.js fallback to CSS) ───
 (function initMoon3D() {
   const canvas = document.getElementById('moonCanvas');
   if (!canvas) return;
@@ -2612,6 +2691,7 @@ if (!navigator.onLine) document.getElementById('offBar')?.classList.add('show');
         const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 100);
         camera.position.set(0, 0, 5);
 
+        // Moon geometry
         const geo = new THREE.SphereGeometry(1.2, 96, 96);
         const mat = new THREE.MeshStandardMaterial({
           color: new THREE.Color(0xf5d98a),
@@ -2624,10 +2704,12 @@ if (!navigator.onLine) document.getElementById('offBar')?.classList.add('show');
         moon.position.set(2.2, 0.9, -2);
         scene.add(moon);
 
+        // Subtle craters using bump-like displacement via normals
         const craterGeo = new THREE.SphereGeometry(1.21, 32, 32);
         const craterMat = new THREE.MeshStandardMaterial({ color: 0xd4b060, transparent: true, opacity: 0.0, wireframe: false });
         scene.add(new THREE.Mesh(craterGeo, craterMat));
 
+        // Atmospheric glow
         const glowGeo = new THREE.SphereGeometry(1.5, 32, 32);
         const glowMat = new THREE.MeshBasicMaterial({
           color: new THREE.Color(0xe8c56a),
@@ -2639,6 +2721,7 @@ if (!navigator.onLine) document.getElementById('offBar')?.classList.add('show');
         glow.position.copy(moon.position);
         scene.add(glow);
 
+        // Starfield
         const starCount = 600;
         const starPositions = new Float32Array(starCount * 3);
         for (let i = 0; i < starCount * 3; i++) starPositions[i] = (Math.random() - 0.5) * 60;
@@ -2647,6 +2730,7 @@ if (!navigator.onLine) document.getElementById('offBar')?.classList.add('show');
         const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.06, transparent: true, opacity: 0.7 });
         scene.add(new THREE.Points(starGeo, starMat));
 
+        // Nebula particles
         const nebCount = 200;
         const nebPositions = new Float32Array(nebCount * 3);
         for (let i = 0; i < nebCount * 3; i++) nebPositions[i] = (Math.random() - 0.5) * 20;
@@ -2655,6 +2739,7 @@ if (!navigator.onLine) document.getElementById('offBar')?.classList.add('show');
         const nebMat = new THREE.PointsMaterial({ color: 0x4a7aff, size: 0.12, transparent: true, opacity: 0.15 });
         scene.add(new THREE.Points(nebGeo, nebMat));
 
+        // Lighting
         const ambientLight = new THREE.AmbientLight(0x0d1b4a, 0.7);
         scene.add(ambientLight);
         const dirLight = new THREE.DirectionalLight(0xfff8e0, 1.6);
@@ -2678,9 +2763,11 @@ if (!navigator.onLine) document.getElementById('offBar')?.classList.add('show');
           moon.rotation.x += 0.0003;
           moon.position.y = 0.9 + Math.sin(time * 0.5) * 0.12;
           glow.position.copy(moon.position);
+          // Subtle parallax on mouse
           camera.position.x += (mouseX - camera.position.x) * 0.02;
           camera.position.y += (-mouseY - camera.position.y) * 0.02;
           camera.lookAt(scene.position);
+          // Glow pulse
           glowMat.opacity = 0.04 + Math.sin(time) * 0.02;
           mat.emissiveIntensity = 0.12 + Math.sin(time * 0.8) * 0.04;
           renderer.render(scene, camera);
@@ -2700,6 +2787,7 @@ if (!navigator.onLine) document.getElementById('offBar')?.classList.add('show');
   }
 
   function fallbackCanvas(cvs) {
+    // CSS-based moon fallback
     cvs.style.display = 'none';
     const div = document.createElement('div');
     div.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;background:radial-gradient(ellipse at 75% 30%, rgba(232,197,106,0.08) 0%, transparent 60%)';
@@ -2710,10 +2798,12 @@ if (!navigator.onLine) document.getElementById('offBar')?.classList.add('show');
 })();
 
 // ── FINAL INIT ─────────────────────────────────────────────────
+// Set today's date as default for period input
 const today = new Date().toISOString().split('T')[0];
 const lastPdInput = document.getElementById('i_lastPd');
 if (lastPdInput && !lastPdInput.value) lastPdInput.value = today;
 
+// Load app if user exists in local state (guest or returning user)
 if (S.user) {
   document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {

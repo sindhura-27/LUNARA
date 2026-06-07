@@ -1,5 +1,5 @@
+cel · JSON
 {
-  "cleanUrls": true,
   "rewrites": [
     {
       "source": "/(.*)",
